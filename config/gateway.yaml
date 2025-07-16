@@ -1,0 +1,106 @@
+# API Gateway Configuration
+# This is a basic configuration file for development
+
+server:
+  http_port: 8080
+  https_port: 8443
+  metrics_port: 9090
+  bind_address: "0.0.0.0"
+  timeouts:
+    request_timeout: "30s"
+    keepalive_timeout: "60s"
+    upstream_timeout: "10s"
+  max_request_size: 10485760  # 10MB
+
+routes:
+  - path: "/api/v1/users"
+    methods: ["GET", "POST"]
+    upstream: "user-service"
+    auth_required: true
+    required_roles: []
+  
+  - path: "/api/v1/users/{id}"
+    methods: ["GET", "PUT", "DELETE"]
+    upstream: "user-service"
+    auth_required: true
+    required_roles: []
+
+  - path: "/health"
+    methods: ["GET"]
+    upstream: "health-service"
+    auth_required: false
+    required_roles: []
+
+upstreams:
+  user-service:
+    discovery:
+      type: "Static"
+      endpoints: ["http://localhost:3001"]
+    load_balancer:
+      type: "RoundRobin"
+    health_check:
+      path: "/health"
+      interval: "30s"
+      timeout: "5s"
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+  
+  health-service:
+    discovery:
+      type: "Static"
+      endpoints: ["http://localhost:3002"]
+    load_balancer:
+      type: "RoundRobin"
+    health_check:
+      path: "/health"
+      interval: "30s"
+      timeout: "5s"
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+
+middleware:
+  rate_limiting:
+    default_limit: 1000
+    route_limits: {}
+    storage:
+      type: "Memory"
+  
+  cors:
+    allowed_origins: ["*"]
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowed_headers: ["Content-Type", "Authorization"]
+    max_age: 3600
+
+auth:
+  jwt:
+    secret: "your-secret-key-here"
+    algorithm: "HS256"
+    expiration: "1h"
+  
+  api_key:
+    header_name: "X-API-Key"
+    keys: {}
+
+observability:
+  metrics:
+    prometheus_enabled: true
+    endpoint_path: "/metrics"
+    custom_metrics: []
+  
+  logging:
+    level: "info"
+    format: "json"
+    output:
+      type: "Stdout"
+  
+  tracing:
+    enabled: false
+    backend:
+      type: "Jaeger"
+      endpoint: "http://localhost:14268/api/traces"
+    sampling_rate: 0.1
+
+service_discovery:
+  kubernetes:
+    default_namespace: "default"
+    watch_all_namespaces: false
