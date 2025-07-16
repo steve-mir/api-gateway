@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast};
 use notify::{Watcher, RecursiveMode, Event, EventKind, recommended_watcher};
 use url::Url;
-use crate::error::{GatewayResult, GatewayError};
+use crate::core::error::{GatewayResult, GatewayError};
 
 /// Main gateway configuration structure
 ///
@@ -169,17 +169,7 @@ impl GatewayConfig {
             errors.push("At least one of http_port or https_port must be specified".to_string());
         }
 
-        if self.server.http_port > 65535 {
-            errors.push(format!("Invalid HTTP port: {} (must be <= 65535)", self.server.http_port));
-        }
-
-        if self.server.https_port > 65535 {
-            errors.push(format!("Invalid HTTPS port: {} (must be <= 65535)", self.server.https_port));
-        }
-
-        if self.server.metrics_port > 65535 {
-            errors.push(format!("Invalid metrics port: {} (must be <= 65535)", self.server.metrics_port));
-        }
+        // Port validation is handled by u16 type bounds (0-65535)
 
         if self.server.max_request_size == 0 {
             errors.push("max_request_size must be greater than 0".to_string());
@@ -920,6 +910,7 @@ pub struct ConfigManager {
     change_sender: broadcast::Sender<ConfigChangeEvent>,
     
     /// Configuration change receiver
+    #[allow(dead_code)]
     change_receiver: broadcast::Receiver<ConfigChangeEvent>,
 }
 

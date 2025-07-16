@@ -7,7 +7,7 @@
 // This will be implemented in task 5: "Load Balancing Implementation"
 
 use async_trait::async_trait;
-use crate::types::{ServiceInstance, IncomingRequest};
+use crate::core::types::{ServiceInstance, IncomingRequest};
 
 #[async_trait]
 pub trait LoadBalancer: Send + Sync {

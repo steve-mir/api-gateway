@@ -7,8 +7,8 @@
 // This will be implemented in task 7: "Authentication and Authorization Framework"
 
 use async_trait::async_trait;
-use crate::types::AuthContext;
-use crate::error::GatewayResult;
+use crate::core::types::AuthContext;
+use crate::core::error::GatewayResult;
 
 #[async_trait]
 pub trait AuthProvider: Send + Sync {

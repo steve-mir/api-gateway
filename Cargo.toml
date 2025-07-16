@@ -76,6 +76,7 @@ humantime = "2.1"
 # URL parsing and routing
 url = "2.5"
 matchit = "0.7"
+urlencoding = "2.1"
 
 # Time utilities
 chrono = { version = "0.4", features = ["serde"] }

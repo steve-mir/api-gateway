@@ -34,23 +34,13 @@
 //! - `Arc` is used to share data between async tasks
 //! - Channels (`mpsc`, `broadcast`) are used for communication between tasks
 
-// Core modules - order matters for dependency resolution
-pub mod error;
-pub mod types;
-pub mod router;
-pub mod middleware;
-pub mod protocols;
-pub mod auth;
-pub mod load_balancer;
-pub mod service_discovery;
-pub mod config;
-pub mod observability;
-
 use tokio::signal;
 use tracing::{info, error};
 
-use crate::config::GatewayConfig;
-use crate::error::GatewayResult;
+// Use the library modules
+use api_gateway::{GatewayConfig, GatewayResult};
+use api_gateway::routing::router::RouterBuilder;
+use api_gateway::server::{HttpServer, ServerConfig};
 
 #[tokio::main]
 async fn main() -> GatewayResult<()> {
@@ -66,25 +56,51 @@ async fn main() -> GatewayResult<()> {
     let _config = GatewayConfig::load_from_file("config/gateway.yaml").await?;
     info!("Configuration loaded successfully");
 
-    // TODO: Initialize gateway components (will be implemented in subsequent tasks)
-    // - Service discovery
-    // - Load balancers  
-    // - Authentication providers
-    // - Middleware pipeline
-    // - Protocol handlers
-    // - HTTP server
+    // Create a basic router with some example routes for testing
+    // TODO: In future tasks, this will be loaded from configuration
+    let router = RouterBuilder::new()
+        .get("/health", "health-service")
+        .get("/ready", "health-service")
+        .get("/api/users", "user-service")
+        .get("/api/users/{id}", "user-service")
+        .post("/api/users", "user-service")
+        .put("/api/users/{id}", "user-service")
+        .delete("/api/users/{id}", "user-service")
+        .get("/api/posts", "post-service")
+        .get("/api/posts/{id}", "post-service")
+        .post("/api/posts", "post-service")
+        .default_route("default-service")
+        .build();
 
-    info!("API Gateway started successfully");
+    // Create server configuration
+    let server_config = ServerConfig {
+        bind_addr: "127.0.0.1:8081".parse().unwrap(),
+        ..Default::default()
+    };
+    
+    // Create and start HTTP server
+    let server = HttpServer::new(router, server_config);
+    let bind_addr = server.bind_addr();
+    
+    info!("API Gateway started successfully on {}", bind_addr);
+
+    // Start server in a separate task so we can handle shutdown signals
+    let server_handle = tokio::spawn(async move {
+        if let Err(e) = server.start().await {
+            error!("Server error: {}", e);
+        }
+    });
 
     // Wait for shutdown signal
-    match signal::ctrl_c().await {
-        Ok(()) => {
+    tokio::select! {
+        _ = signal::ctrl_c() => {
             info!("Received shutdown signal, gracefully shutting down...");
         }
-        Err(err) => {
-            error!("Unable to listen for shutdown signal: {}", err);
+        _ = server_handle => {
+            info!("Server task completed");
         }
     }
 
+    info!("API Gateway shutdown complete");
     Ok(())
 }

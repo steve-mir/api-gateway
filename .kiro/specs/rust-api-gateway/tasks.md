@@ -16,7 +16,7 @@
   - Write unit tests for configuration parsing and validation
   - _Requirements: 8.1, 8.2, 8.3_
 
-- [ ] 3. Basic HTTP Server and Request Handling
+- [x] 3. Basic HTTP Server and Request Handling
   - Implement basic HTTP server using axum framework
   - Create request/response wrapper types with protocol detection
   - Build basic routing system using radix tree for path matching
@@ -24,6 +24,8 @@
   - Implement request context creation and propagation
   - Write integration tests for basic HTTP request handling
   - _Requirements: 1.1, 1.2, 6.1_
+
+- [ ] 3.2. Build proper folder structure. Improve file struture by properly placing files in the right folderd.
 
 - [ ] 4. Service Discovery Foundation
   - Define ServiceDiscovery trait with async methods for service registration and discovery

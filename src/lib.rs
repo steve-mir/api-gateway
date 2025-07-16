@@ -4,17 +4,16 @@
 //! This library provides all the core functionality for building and running an API gateway.
 
 // Core modules - order matters for dependency resolution
-pub mod error;
-pub mod types;
-pub mod router;
+pub mod core;
+pub mod server;
 pub mod middleware;
 pub mod protocols;
 pub mod auth;
 pub mod load_balancer;
 pub mod service_discovery;
-pub mod config;
+pub mod routing;
 pub mod observability;
 
 // Re-export commonly used types
-pub use error::{GatewayError, GatewayResult};
-pub use config::{GatewayConfig, ConfigManager};
+pub use core::error::{GatewayError, GatewayResult};
+pub use core::config::{GatewayConfig, ConfigManager};

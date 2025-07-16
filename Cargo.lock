@@ -139,6 +139,7 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "url",
+ "urlencoding",
  "uuid",
  "wiremock",
 ]

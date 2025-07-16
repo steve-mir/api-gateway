@@ -16,18 +16,24 @@ routes:
   - path: "/api/v1/users"
     methods: ["GET", "POST"]
     upstream: "user-service"
+    middleware: []
+    timeout: "30s"
     auth_required: true
     required_roles: []
   
   - path: "/api/v1/users/{id}"
     methods: ["GET", "PUT", "DELETE"]
     upstream: "user-service"
+    middleware: []
+    timeout: "30s"
     auth_required: true
     required_roles: []
 
   - path: "/health"
     methods: ["GET"]
     upstream: "health-service"
+    middleware: []
+    timeout: "10s"
     auth_required: false
     required_roles: []
 

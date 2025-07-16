@@ -7,8 +7,8 @@
 // This will be implemented in task 4: "Service Discovery Foundation"
 
 use async_trait::async_trait;
-use crate::types::ServiceInstance;
-use crate::error::GatewayResult;
+use crate::core::types::ServiceInstance;
+use crate::core::error::GatewayResult;
 
 #[async_trait]
 pub trait ServiceDiscovery: Send + Sync {
