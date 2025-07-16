@@ -25,8 +25,6 @@
   - Write integration tests for basic HTTP request handling
   - _Requirements: 1.1, 1.2, 6.1_
 
-- [ ] 3.2. Build proper folder structure. Improve file struture by properly placing files in the right folderd.
-
 - [ ] 4. Service Discovery Foundation
   - Define ServiceDiscovery trait with async methods for service registration and discovery
   - Implement Kubernetes service discovery using kube-rs client

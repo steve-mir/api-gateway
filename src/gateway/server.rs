@@ -86,7 +86,7 @@ impl ServerState {
 }
 
 /// HTTP Server implementation
-pub struct HttpServer {
+pub struct GatewayServer {
     /// Server state shared across handlers
     state: ServerState,
     
@@ -94,7 +94,7 @@ pub struct HttpServer {
     app: AxumRouter,
 }
 
-impl HttpServer {
+impl GatewayServer {
     /// Create a new HTTP server
     pub fn new(router: Router, config: ServerConfig) -> Self {
         let state = ServerState::new(router, config.clone());
@@ -322,7 +322,7 @@ mod tests {
     use axum::http::Method;
     use tokio::time::{timeout, Duration};
 
-    async fn create_test_server() -> HttpServer {
+    async fn create_test_server() -> GatewayServer {
         let router = RouterBuilder::new()
             .get("/api/users", "user-service")
             .get("/api/users/{id}", "user-service")
@@ -336,7 +336,7 @@ mod tests {
             ..Default::default()
         };
 
-        HttpServer::new(router, config)
+        GatewayServer::new(router, config)
     }
 
     #[tokio::test]

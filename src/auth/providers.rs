@@ -1,10 +1,6 @@
-//! # Authentication Module
+//! # Authentication Providers
 //!
-//! This module will contain authentication and authorization providers.
-//! It will be implemented in subsequent tasks.
-
-// Placeholder for authentication implementation
-// This will be implemented in task 7: "Authentication and Authorization Framework"
+//! This module contains different authentication provider implementations.
 
 use async_trait::async_trait;
 use crate::core::types::AuthContext;

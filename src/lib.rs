@@ -5,12 +5,12 @@
 
 // Core modules - order matters for dependency resolution
 pub mod core;
-pub mod server;
+pub mod gateway;
 pub mod middleware;
 pub mod protocols;
 pub mod auth;
-pub mod load_balancer;
-pub mod service_discovery;
+pub mod load_balancing;
+pub mod discovery;
 pub mod routing;
 pub mod observability;
 

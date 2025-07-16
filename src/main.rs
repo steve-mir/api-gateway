@@ -40,7 +40,7 @@ use tracing::{info, error};
 // Use the library modules
 use api_gateway::{GatewayConfig, GatewayResult};
 use api_gateway::routing::router::RouterBuilder;
-use api_gateway::server::{HttpServer, ServerConfig};
+use api_gateway::gateway::server::{GatewayServer, ServerConfig};
 
 #[tokio::main]
 async fn main() -> GatewayResult<()> {
@@ -79,7 +79,7 @@ async fn main() -> GatewayResult<()> {
     };
     
     // Create and start HTTP server
-    let server = HttpServer::new(router, server_config);
+    let server = GatewayServer::new(router, server_config);
     let bind_addr = server.bind_addr();
     
     info!("API Gateway started successfully on {}", bind_addr);

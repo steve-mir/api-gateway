@@ -23,3 +23,13 @@ pub struct KubernetesDiscovery {
 pub struct ConsulDiscovery {
     // TODO: Implement Consul service discovery
 }
+
+pub struct ServiceRegistry {
+    // TODO: Implement service registry
+}
+
+impl ServiceRegistry {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
