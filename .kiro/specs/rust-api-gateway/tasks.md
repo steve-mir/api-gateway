@@ -76,7 +76,7 @@
 
 - [ ] 7.2 Add PASETO token support as alternative to JWT using paseto crate
 
-- [ ] 8. Rate Limiting System
+- [x] 8. Rate Limiting System
   - Design rate limiting architecture with pluggable algorithms and storage
   - Implement token bucket algorithm for rate limiting
   - Build sliding window rate limiting for more precise control

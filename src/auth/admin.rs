@@ -29,7 +29,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -38,7 +38,7 @@ use crate::auth::providers::{
     RbacManager, Role,
 };
 use crate::core::error::{GatewayError, GatewayResult};
-use crate::core::types::AuthContext;
+
 
 /// Admin API state containing authentication providers and stores
 #[derive(Clone)]
@@ -237,8 +237,8 @@ pub fn create_admin_router(state: AdminState) -> Router {
 
 /// Create a new API key
 async fn create_api_key(
-    State(state): State<AdminState>,
-    Json(request): Json<CreateApiKeyRequest>,
+    State(_state): State<AdminState>,
+    Json(_request): Json<CreateApiKeyRequest>,
 ) -> GatewayResult<Json<CreateApiKeyResponse>> {
     // Generate a new API key
     let api_key = ApiKeyAuthProvider::generate_key();
@@ -248,18 +248,18 @@ async fn create_api_key(
     let key_record = ApiKey {
         id: Uuid::new_v4().to_string(),
         key_hash,
-        user_id: request.user_id,
-        name: request.name,
-        roles: request.roles,
-        permissions: request.permissions,
+        user_id: _request.user_id,
+        name: _request.name,
+        roles: _request.roles,
+        permissions: _request.permissions,
         created_at: Utc::now(),
-        expires_at: request.expires_at,
+        expires_at: _request.expires_at,
         active: true,
-        rate_limit: request.rate_limit,
+        rate_limit: _request.rate_limit,
     };
 
     // Store the API key
-    state.api_key_store.store_key(&key_record).await?;
+    _state.api_key_store.store_key(&key_record).await?;
 
     let response = CreateApiKeyResponse {
         api_key,
@@ -320,8 +320,8 @@ async fn list_api_keys(
 
 /// Get a specific API key by ID
 async fn get_api_key(
-    State(state): State<AdminState>,
-    Path(key_id): Path<String>,
+    State(_state): State<AdminState>,
+    Path(_key_id): Path<String>,
 ) -> GatewayResult<Json<ApiKeyInfo>> {
     // This would need to be implemented in the ApiKeyStore trait
     // For now, return a not found error

@@ -25,7 +25,7 @@ use std::future::Future;
 
 use crate::auth::providers::AuthProvider;
 use crate::core::error::{GatewayError, GatewayResult};
-use crate::core::types::{AuthContext, RequestContext};
+use crate::core::types::AuthContext;
 
 /// Authentication middleware configuration
 #[derive(Debug, Clone)]

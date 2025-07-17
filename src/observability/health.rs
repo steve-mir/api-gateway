@@ -24,12 +24,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::broadcast;
 use tokio::time::{interval, timeout};
 use tracing::{debug, error, info, warn};
 
 use crate::core::error::{GatewayError, GatewayResult};
-use crate::core::types::{HealthStatus as CoreHealthStatus, ServiceInstance};
+use crate::core::types::HealthStatus as CoreHealthStatus;
 use crate::discovery::ServiceRegistry;
 
 /// Overall health status of the gateway or a service

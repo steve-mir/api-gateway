@@ -29,9 +29,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use tracing::info;
 
-use crate::core::error::{GatewayError, GatewayResult};
+
 use crate::observability::health::{
     HealthChecker, HealthCheckConfig, HealthReport, HealthStats, ServiceStatus,
 };

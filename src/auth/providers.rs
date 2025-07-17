@@ -17,7 +17,7 @@ use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use oauth2::{
-    basic::BasicClient, reqwest::async_http_client, AuthUrl, ClientId, ClientSecret,
+    basic::BasicClient, AuthUrl, ClientId, ClientSecret,
     CsrfToken, PkceCodeChallenge, RedirectUrl, Scope, TokenUrl
 };
 // PASETO support temporarily disabled due to API compatibility issues
@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uuid::Uuid;
+
 
 use crate::core::error::{GatewayError, GatewayResult};
 use crate::core::types::AuthContext;
