@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. Project Setup and Core Foundation
+- [x] 1. Project Setup and Core Foundation
   - Create Cargo.toml with all necessary dependencies (tokio, axum, tower, hyper, tonic, etc.)
   - Set up project structure with modules for core components (router, middleware, protocols, etc.)
   - Implement basic error types and result handling using thiserror
@@ -25,16 +25,25 @@
   - Write integration tests for basic HTTP request handling
   - _Requirements: 1.1, 1.2, 6.1_
 
-- [ ] 4. Service Discovery Foundation
+- [x] 4. Service Discovery Foundation
   - Define ServiceDiscovery trait with async methods for service registration and discovery
   - Implement Kubernetes service discovery using kube-rs client
+  - Implement service discovery using consul
+  - Implement service discovery using NATS
+  - Add the flexibility to choose which mechanism to use for service discovery
   - Create ServiceInstance data structure with health status tracking
   - Build service registry with thread-safe concurrent access using DashMap
   - Add service change notification system using tokio channels
   - Write unit tests for service discovery components
   - _Requirements: 2.1, 2.3, 13.2_
 
-- [ ] 5. Load Balancing Implementation
+- [ ] 5. Configuration system implementation 2
+  - Add runime configuration modification support for admin endpoints
+  - Create configuration change audit trail and rollback mechanism.
+
+- [ ] 6. Basic HTTP Server and Request Handling
+  - Add admin route seperation from gateway routes
+- [ ] 5. Load Balancing Implementation 2
   - Create LoadBalancer trait with pluggable algorithm support
   - Implement round-robin load balancing with atomic counters
   - Build least connections balancer using concurrent connection tracking

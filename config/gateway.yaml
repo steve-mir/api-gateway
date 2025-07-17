@@ -37,6 +37,23 @@ routes:
     auth_required: false
     required_roles: []
 
+  # Product service routes
+  - path: "/api/v1/products"
+    methods: ["GET", "POST"]
+    upstream: "product-service"
+    middleware: []
+    timeout: "30s"
+    auth_required: false
+    required_roles: []
+  
+  - path: "/api/v1/products/{id}"
+    methods: ["GET", "PUT", "DELETE"]
+    upstream: "product-service"
+    middleware: []
+    timeout: "30s"
+    auth_required: false
+    required_roles: []
+
 upstreams:
   user-service:
     discovery:
@@ -55,6 +72,20 @@ upstreams:
     discovery:
       type: "Static"
       endpoints: ["http://localhost:3002"]
+    load_balancer:
+      type: "RoundRobin"
+    health_check:
+      path: "/health"
+      interval: "30s"
+      timeout: "5s"
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+
+  # Example: Register a new product service
+  product-service:
+    discovery:
+      type: "Static"
+      endpoints: ["http://localhost:3003"]
     load_balancer:
       type: "RoundRobin"
     health_check:

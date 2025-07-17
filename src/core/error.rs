@@ -138,6 +138,13 @@ impl GatewayError {
         }
     }
 
+    /// Create a service discovery error with a custom message
+    pub fn service_discovery<S: Into<String>>(message: S) -> Self {
+        Self::ServiceDiscovery {
+            message: message.into(),
+        }
+    }
+
     /// Create an internal error with a custom message
     pub fn internal<S: Into<String>>(message: S) -> Self {
         Self::Internal {
