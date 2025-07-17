@@ -12,7 +12,7 @@
 //! as they can modify the gateway's behavior.
 
 use crate::core::config::GatewayConfig;
-use crate::admin::{ConfigAudit, ConfigChange, ConfigChangeType, RuntimeConfigManager, ServiceManagementRouter, ServiceManagementState};
+use crate::admin::{ConfigAudit, ConfigChange, ConfigChangeType, RuntimeConfigManager, ServiceManagementRouter, ServiceManagementState, LoadBalancerAdminRouter, LoadBalancerAdminState};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -32,6 +32,7 @@ pub struct AdminState {
     pub config_manager: Arc<RuntimeConfigManager>,
     pub audit: Arc<ConfigAudit>,
     pub service_management: Option<ServiceManagementState>,
+    pub load_balancer: Option<LoadBalancerAdminState>,
 }
 
 /// Admin router for configuration management endpoints
@@ -74,6 +75,11 @@ impl AdminRouter {
         // Add service management routes if service management is enabled
         if let Some(service_management_state) = state.service_management {
             router = router.nest("/services", ServiceManagementRouter::create_router(service_management_state));
+        }
+
+        // Add load balancer admin routes if load balancer management is enabled
+        if let Some(load_balancer_state) = state.load_balancer {
+            router = router.nest("/load-balancer", LoadBalancerAdminRouter::create_router(load_balancer_state));
         }
 
         router

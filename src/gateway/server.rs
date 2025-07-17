@@ -150,6 +150,7 @@ impl GatewayServer {
             config_manager,
             audit,
             service_management: None, // Service management will be added in future tasks
+            load_balancer: None, // Load balancer management will be added when needed
         };
 
         // Create admin router with all endpoints
