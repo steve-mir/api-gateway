@@ -72,17 +72,20 @@ async fn main() -> GatewayResult<()> {
         .default_route("default-service")
         .build();
 
-    // Create server configuration
+    // Create server configuration with separate admin and gateway ports
     let server_config = ServerConfig {
-        bind_addr: "127.0.0.1:8081".parse().unwrap(),
+        bind_addr: "127.0.0.1:8080".parse().unwrap(),  // Gateway routes
+        admin_bind_addr: "127.0.0.1:8081".parse().unwrap(),  // Admin routes
         ..Default::default()
     };
     
     // Create and start HTTP server
     let server = GatewayServer::new(router, server_config);
-    let bind_addr = server.bind_addr();
+    let gateway_addr = server.bind_addr();
+    let admin_addr = server.admin_bind_addr();
     
-    info!("API Gateway started successfully on {}", bind_addr);
+    info!("API Gateway started successfully on {}", gateway_addr);
+    info!("Admin interface started successfully on {}", admin_addr);
 
     // Start server in a separate task so we can handle shutdown signals
     let server_handle = tokio::spawn(async move {

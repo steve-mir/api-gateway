@@ -15,6 +15,9 @@
 use crate::core::error::{GatewayError, GatewayResult};
 use crate::routing::router::Router;
 use crate::core::types::{IncomingRequest, RequestContext, Protocol};
+use crate::admin::{AdminRouter, AdminState};
+use crate::admin::config_manager::RuntimeConfigManager;
+use crate::admin::audit::ConfigAudit;
 use axum::{
     body::Body,
     extract::{Request, State},
@@ -37,8 +40,11 @@ use tracing::{info, warn, debug, instrument};
 /// HTTP Server configuration
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
-    /// Server bind address
+    /// Server bind address for gateway routes
     pub bind_addr: SocketAddr,
+    
+    /// Admin server bind address (separate from gateway)
+    pub admin_bind_addr: SocketAddr,
     
     /// Maximum request body size in bytes
     pub max_body_size: usize,
@@ -57,6 +63,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             bind_addr: "0.0.0.0:8080".parse().unwrap(),
+            admin_bind_addr: "0.0.0.0:8081".parse().unwrap(),
             max_body_size: 16 * 1024 * 1024, // 16MB
             request_timeout: std::time::Duration::from_secs(30),
             enable_compression: true,
@@ -90,59 +97,124 @@ pub struct GatewayServer {
     /// Server state shared across handlers
     state: ServerState,
     
-    /// Axum application router
-    app: AxumRouter,
+    /// Axum application router for gateway routes
+    gateway_app: AxumRouter,
+    
+    /// Axum application router for admin routes
+    admin_app: AxumRouter,
 }
 
 impl GatewayServer {
-    /// Create a new HTTP server
+    /// Create a new HTTP server with separated admin and gateway routes
     pub fn new(router: Router, config: ServerConfig) -> Self {
         let state = ServerState::new(router, config.clone());
         
-        // Build the Axum application with middleware
-        let mut app = AxumRouter::new()
+        // Build the gateway application for handling API requests
+        let mut gateway_app = AxumRouter::new()
             .route("/*path", any(handle_request))
             .with_state(state.clone());
 
-        // Add middleware layers
-        app = app.layer(
+        // Add middleware layers to gateway app
+        gateway_app = gateway_app.layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
                 .layer(CompressionLayer::new())
         );
 
         if config.enable_cors {
-            app = app.layer(CorsLayer::permissive());
+            gateway_app = gateway_app.layer(CorsLayer::permissive());
         }
 
-        Self { state, app }
+        // Create admin application for configuration management
+        let admin_app = Self::create_admin_app(state.clone());
+
+        Self { 
+            state, 
+            gateway_app,
+            admin_app,
+        }
     }
 
-    /// Start the HTTP server
+    /// Create the admin application with configuration management endpoints
+    fn create_admin_app(state: ServerState) -> AxumRouter {
+        // Create audit trail for configuration changes
+        let audit = Arc::new(ConfigAudit::new(Some("audit.log".into())));
+        
+        // Create runtime configuration manager
+        // For now, use a default config - in future tasks this will be loaded from the actual config
+        let initial_config = crate::core::config::GatewayConfig::default();
+        let config_manager = Arc::new(RuntimeConfigManager::new(initial_config, audit.clone()));
+        
+        // Create admin state
+        let admin_state = AdminState {
+            config_manager,
+            audit,
+        };
+
+        // Create admin router with all endpoints
+        let mut admin_app = AdminRouter::create_router(admin_state);
+
+        // Add health check endpoints for admin interface
+        admin_app = admin_app
+            .route("/health", axum::routing::get(health_check))
+            .route("/ready", axum::routing::get(readiness_check));
+
+        // Add middleware layers to admin app
+        admin_app = admin_app.layer(
+            ServiceBuilder::new()
+                .layer(TraceLayer::new_for_http())
+                .layer(CompressionLayer::new())
+        );
+
+        admin_app
+    }
+
+    /// Start both the gateway and admin HTTP servers
     #[instrument(skip(self))]
     pub async fn start(self) -> GatewayResult<()> {
-        let bind_addr = self.state.config.bind_addr;
+        let gateway_bind_addr = self.state.config.bind_addr;
+        let admin_bind_addr = self.state.config.admin_bind_addr;
         
-        info!("Starting HTTP server on {}", bind_addr);
+        info!("Starting Gateway HTTP server on {}", gateway_bind_addr);
+        info!("Starting Admin HTTP server on {}", admin_bind_addr);
         
-        // Create TCP listener
-        let listener = TcpListener::bind(bind_addr)
+        // Create TCP listeners for both servers
+        let gateway_listener = TcpListener::bind(gateway_bind_addr)
             .await
-            .map_err(|e| GatewayError::internal(format!("Failed to bind to {}: {}", bind_addr, e)))?;
+            .map_err(|e| GatewayError::internal(format!("Failed to bind gateway server to {}: {}", gateway_bind_addr, e)))?;
 
-        info!("HTTP server listening on {}", bind_addr);
-
-        // Start serving requests
-        axum::serve(listener, self.app)
+        let admin_listener = TcpListener::bind(admin_bind_addr)
             .await
-            .map_err(|e| GatewayError::internal(format!("Server error: {}", e)))?;
+            .map_err(|e| GatewayError::internal(format!("Failed to bind admin server to {}: {}", admin_bind_addr, e)))?;
+
+        info!("Gateway HTTP server listening on {}", gateway_bind_addr);
+        info!("Admin HTTP server listening on {}", admin_bind_addr);
+
+        // Start both servers concurrently
+        let gateway_server = axum::serve(gateway_listener, self.gateway_app);
+        let admin_server = axum::serve(admin_listener, self.admin_app);
+
+        // Use tokio::select to run both servers concurrently
+        tokio::select! {
+            result = gateway_server => {
+                result.map_err(|e| GatewayError::internal(format!("Gateway server error: {}", e)))?;
+            }
+            result = admin_server => {
+                result.map_err(|e| GatewayError::internal(format!("Admin server error: {}", e)))?;
+            }
+        }
 
         Ok(())
     }
 
-    /// Get server bind address
+    /// Get gateway server bind address
     pub fn bind_addr(&self) -> SocketAddr {
         self.state.config.bind_addr
+    }
+
+    /// Get admin server bind address
+    pub fn admin_bind_addr(&self) -> SocketAddr {
+        self.state.config.admin_bind_addr
     }
 }
 

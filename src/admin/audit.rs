@@ -23,7 +23,7 @@ use uuid::Uuid;
 const MAX_AUDIT_RECORDS: usize = 1000;
 
 /// Type of configuration change
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum ConfigChangeType {
     /// Full configuration replacement
     FullReplace,
@@ -314,7 +314,7 @@ impl ConfigAudit {
             .map_err(|e| GatewayError::internal(format!("Failed to serialize audit record: {}", e)))?;
 
         // Append to the audit file
-        let mut content = format!("{}\n", json_line);
+        let content = format!("{}\n", json_line);
         
         // Use OpenOptions to append to the file
         use tokio::fs::OpenOptions;

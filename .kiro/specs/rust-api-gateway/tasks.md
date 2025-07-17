@@ -13,6 +13,8 @@
   - Implement configuration validation with detailed error messages
   - Build configuration file watcher using notify crate for hot reloading
   - Add environment variable override support
+  - Add runime configuration modification support for admin endpoints
+  - Create configuration change audit trail and rollback mechanism.
   - Write unit tests for configuration parsing and validation
   - _Requirements: 8.1, 8.2, 8.3_
 
@@ -37,12 +39,9 @@
   - Write unit tests for service discovery components
   - _Requirements: 2.1, 2.3, 13.2_
 
-- [ ] 5. Configuration system implementation 2
-  - Add runime configuration modification support for admin endpoints
-  - Create configuration change audit trail and rollback mechanism.
-
 - [ ] 6. Basic HTTP Server and Request Handling
   - Add admin route seperation from gateway routes
+  
 - [ ] 5. Load Balancing Implementation 2
   - Create LoadBalancer trait with pluggable algorithm support
   - Implement round-robin load balancing with atomic counters
