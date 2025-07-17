@@ -47,9 +47,11 @@ reqwest = { version = "0.11", features = ["json", "stream"] }
 
 # Authentication and security
 jsonwebtoken = "9.2"
+paseto = "2.0.2"
 oauth2 = "4.4"
 rustls = "0.22"
 rustls-pemfile = "2.0"
+base64 = "0.22"
 
 # Service discovery
 kube = { version = "0.87", features = ["client", "derive"] }
@@ -92,6 +94,7 @@ rand = "0.8"
 # Hashing
 sha2 = "0.10"
 blake3 = "1.5"
+hex = "0.4"
 
 # Compression
 flate2 = "1.0"

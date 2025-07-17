@@ -66,6 +66,7 @@
 - [ ] 7. Authentication and Authorization Framework
   - Create AuthProvider trait for pluggable authentication methods
   - Implement JWT token validation using jsonwebtoken crate
+  - Add PASETO token support as alternative to JWT using paseto crate
   - Build API key authentication with configurable key storage
   - Add OAuth2/OpenID Connect integration using oauth2 crate
   - Implement role-based access control (RBAC) with permission checking
