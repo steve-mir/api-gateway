@@ -271,7 +271,7 @@ async fn create_api_key(
 
 /// List API keys with optional filtering
 async fn list_api_keys(
-    State(state): State<AdminState>,
+    State(_state): State<AdminState>,
     Query(query): Query<ListApiKeysQuery>,
 ) -> GatewayResult<Json<ListApiKeysResponse>> {
     let page = query.page.unwrap_or(1);
@@ -280,7 +280,7 @@ async fn list_api_keys(
     // For now, we'll implement a simple in-memory filtering
     // In a real implementation, this would be done at the database level
     let all_keys = if let Some(user_id) = &query.user_id {
-        state.api_key_store.list_user_keys(user_id).await?
+        _state.api_key_store.list_user_keys(user_id).await?
     } else {
         // This would need to be implemented in the ApiKeyStore trait
         // For now, return empty list
@@ -330,9 +330,9 @@ async fn get_api_key(
 
 /// Update an API key
 async fn update_api_key(
-    State(state): State<AdminState>,
-    Path(key_id): Path<String>,
-    Json(request): Json<UpdateApiKeyRequest>,
+    State(_state): State<AdminState>,
+    Path(_key_id): Path<String>,
+    Json(_request): Json<UpdateApiKeyRequest>,
 ) -> GatewayResult<Json<ApiKeyInfo>> {
     // This would need to be implemented in the ApiKeyStore trait
     // For now, return a not implemented error
@@ -341,17 +341,17 @@ async fn update_api_key(
 
 /// Delete an API key
 async fn delete_api_key(
-    State(state): State<AdminState>,
+    State(_state): State<AdminState>,
     Path(key_id): Path<String>,
 ) -> GatewayResult<StatusCode> {
-    state.api_key_store.delete_key(&key_id).await?;
+    _state.api_key_store.delete_key(&key_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// Regenerate an API key (creates new key, invalidates old one)
 async fn regenerate_api_key(
-    State(state): State<AdminState>,
-    Path(key_id): Path<String>,
+    State(_state): State<AdminState>,
+    Path(_key_id): Path<String>,
 ) -> GatewayResult<Json<CreateApiKeyResponse>> {
     // This would need to be implemented by:
     // 1. Looking up the existing key
@@ -363,7 +363,7 @@ async fn regenerate_api_key(
 
 /// Create a new role
 async fn create_role(
-    State(state): State<AdminState>,
+    State(_state): State<AdminState>,
     Json(request): Json<CreateRoleRequest>,
 ) -> GatewayResult<Json<Role>> {
     let role = Role {
@@ -373,12 +373,12 @@ async fn create_role(
         parent_roles: request.parent_roles,
     };
 
-    state.rbac_manager.add_role(role.clone()).await?;
+    _state.rbac_manager.add_role(role.clone()).await?;
     Ok(Json(role))
 }
 
 /// List all roles
-async fn list_roles(State(state): State<AdminState>) -> GatewayResult<Json<Vec<Role>>> {
+async fn list_roles(State(_state): State<AdminState>) -> GatewayResult<Json<Vec<Role>>> {
     // This would need to be implemented in the RbacManager
     // For now, return empty list
     Ok(Json(Vec::new()))
@@ -386,8 +386,8 @@ async fn list_roles(State(state): State<AdminState>) -> GatewayResult<Json<Vec<R
 
 /// Get a specific role
 async fn get_role(
-    State(state): State<AdminState>,
-    Path(role_name): Path<String>,
+    State(_state): State<AdminState>,
+    Path(_role_name): Path<String>,
 ) -> GatewayResult<Json<Role>> {
     // This would need to be implemented in the RbacManager
     Err(GatewayError::internal("Role lookup not implemented"))
@@ -395,9 +395,9 @@ async fn get_role(
 
 /// Update a role
 async fn update_role(
-    State(state): State<AdminState>,
-    Path(role_name): Path<String>,
-    Json(request): Json<UpdateRoleRequest>,
+    State(_state): State<AdminState>,
+    Path(_role_name): Path<String>,
+    Json(_request): Json<UpdateRoleRequest>,
 ) -> GatewayResult<Json<Role>> {
     // This would need to be implemented in the RbacManager
     Err(GatewayError::internal("Role update not implemented"))
@@ -405,8 +405,8 @@ async fn update_role(
 
 /// Delete a role
 async fn delete_role(
-    State(state): State<AdminState>,
-    Path(role_name): Path<String>,
+    State(_state): State<AdminState>,
+    Path(_role_name): Path<String>,
 ) -> GatewayResult<StatusCode> {
     // This would need to be implemented in the RbacManager
     Err(GatewayError::internal("Role deletion not implemented"))
@@ -414,7 +414,7 @@ async fn delete_role(
 
 /// Create a new permission
 async fn create_permission(
-    State(state): State<AdminState>,
+    State(_state): State<AdminState>,
     Json(request): Json<CreatePermissionRequest>,
 ) -> GatewayResult<Json<Permission>> {
     let permission = Permission {
@@ -424,20 +424,20 @@ async fn create_permission(
         actions: request.actions,
     };
 
-    state.rbac_manager.add_permission(permission.clone()).await?;
+    _state.rbac_manager.add_permission(permission.clone()).await?;
     Ok(Json(permission))
 }
 
 /// List all permissions
-async fn list_permissions(State(state): State<AdminState>) -> GatewayResult<Json<Vec<Permission>>> {
+async fn list_permissions(State(_state): State<AdminState>) -> GatewayResult<Json<Vec<Permission>>> {
     // This would need to be implemented in the RbacManager
     Ok(Json(Vec::new()))
 }
 
 /// Get a specific permission
 async fn get_permission(
-    State(state): State<AdminState>,
-    Path(permission_name): Path<String>,
+    State(_state): State<AdminState>,
+    Path(_permission_name): Path<String>,
 ) -> GatewayResult<Json<Permission>> {
     // This would need to be implemented in the RbacManager
     Err(GatewayError::internal("Permission lookup not implemented"))
@@ -445,9 +445,9 @@ async fn get_permission(
 
 /// Update a permission
 async fn update_permission(
-    State(state): State<AdminState>,
-    Path(permission_name): Path<String>,
-    Json(request): Json<UpdatePermissionRequest>,
+    State(_state): State<AdminState>,
+    Path(_permission_name): Path<String>,
+    Json(_request): Json<UpdatePermissionRequest>,
 ) -> GatewayResult<Json<Permission>> {
     // This would need to be implemented in the RbacManager
     Err(GatewayError::internal("Permission update not implemented"))
@@ -455,8 +455,8 @@ async fn update_permission(
 
 /// Delete a permission
 async fn delete_permission(
-    State(state): State<AdminState>,
-    Path(permission_name): Path<String>,
+    State(_state): State<AdminState>,
+    Path(_permission_name): Path<String>,
 ) -> GatewayResult<StatusCode> {
     // This would need to be implemented in the RbacManager
     Err(GatewayError::internal("Permission deletion not implemented"))
@@ -464,7 +464,7 @@ async fn delete_permission(
 
 /// Create a new policy
 async fn create_policy(
-    State(state): State<AdminState>,
+    State(_state): State<AdminState>,
     Json(request): Json<CreatePolicyRequest>,
 ) -> GatewayResult<Json<Policy>> {
     let policy = Policy {
@@ -472,20 +472,20 @@ async fn create_policy(
         rules: request.rules,
     };
 
-    state.rbac_manager.add_policy(policy.clone()).await?;
+    _state.rbac_manager.add_policy(policy.clone()).await?;
     Ok(Json(policy))
 }
 
 /// List all policies
-async fn list_policies(State(state): State<AdminState>) -> GatewayResult<Json<Vec<Policy>>> {
+async fn list_policies(State(_state): State<AdminState>) -> GatewayResult<Json<Vec<Policy>>> {
     // This would need to be implemented in the RbacManager
     Ok(Json(Vec::new()))
 }
 
 /// Get a specific policy
 async fn get_policy(
-    State(state): State<AdminState>,
-    Path(resource): Path<String>,
+    State(_state): State<AdminState>,
+    Path(_resource): Path<String>,
 ) -> GatewayResult<Json<Policy>> {
     // This would need to be implemented in the RbacManager
     Err(GatewayError::internal("Policy lookup not implemented"))
@@ -493,25 +493,25 @@ async fn get_policy(
 
 /// Update a policy
 async fn update_policy(
-    State(state): State<AdminState>,
-    Path(resource): Path<String>,
+    State(_state): State<AdminState>,
+    Path(_resource): Path<String>,
     Json(policy): Json<Policy>,
 ) -> GatewayResult<Json<Policy>> {
-    state.rbac_manager.add_policy(policy.clone()).await?;
+    _state.rbac_manager.add_policy(policy.clone()).await?;
     Ok(Json(policy))
 }
 
 /// Delete a policy
 async fn delete_policy(
-    State(state): State<AdminState>,
-    Path(resource): Path<String>,
+    State(_state): State<AdminState>,
+    Path(_resource): Path<String>,
 ) -> GatewayResult<StatusCode> {
     // This would need to be implemented in the RbacManager
     Err(GatewayError::internal("Policy deletion not implemented"))
 }
 
 /// Get authentication statistics
-async fn get_auth_stats(State(state): State<AdminState>) -> GatewayResult<Json<AuthStats>> {
+async fn get_auth_stats(State(_state): State<AdminState>) -> GatewayResult<Json<AuthStats>> {
     // In a real implementation, these would be collected from various sources
     let stats = AuthStats {
         total_api_keys: 0,

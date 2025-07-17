@@ -37,6 +37,7 @@ anyhow = "1.0"
 
 # Async traits
 async-trait = "0.1"
+futures = "0.3"
 
 # Concurrent data structures
 dashmap = "5.5"

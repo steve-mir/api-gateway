@@ -17,6 +17,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
 use thiserror::Error;
+use std::convert::Infallible;
 
 /// Main result type used throughout the gateway
 /// 
@@ -206,6 +207,14 @@ impl GatewayError {
             Self::HttpClient(err) => err.is_timeout() || err.is_connect(),
             _ => false,
         }
+    }
+}
+
+/// Implement conversion from Infallible for middleware compatibility
+impl From<Infallible> for GatewayError {
+    fn from(infallible: Infallible) -> Self {
+        // This should never be called since Infallible can never be constructed
+        match infallible {}
     }
 }
 

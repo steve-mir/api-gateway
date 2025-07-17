@@ -18,7 +18,9 @@ use crate::core::types::{IncomingRequest, RequestContext, Protocol};
 use crate::admin::{AdminRouter, AdminState};
 use crate::admin::config_manager::RuntimeConfigManager;
 use crate::admin::audit::ConfigAudit;
+use crate::admin::circuit_breaker::{CircuitBreakerAdminRouter, CircuitBreakerAdminState};
 use crate::observability::health::{HealthChecker, HealthCheckConfig};
+use crate::middleware::circuit_breaker::{CircuitBreakerLayer, CircuitBreakerMiddlewareConfig};
 use axum::{
     body::Body,
     extract::{Request, State},
@@ -58,6 +60,9 @@ pub struct ServerConfig {
     
     /// Enable CORS
     pub enable_cors: bool,
+    
+    /// Circuit breaker configuration
+    pub circuit_breaker: CircuitBreakerMiddlewareConfig,
 }
 
 impl Default for ServerConfig {
@@ -69,6 +74,7 @@ impl Default for ServerConfig {
             request_timeout: std::time::Duration::from_secs(30),
             enable_compression: true,
             enable_cors: true,
+            circuit_breaker: CircuitBreakerMiddlewareConfig::default(),
         }
     }
 }
@@ -81,14 +87,18 @@ pub struct ServerState {
     
     /// Server configuration
     pub config: ServerConfig,
+    
+    /// Circuit breaker layer for upstream service protection
+    pub circuit_breaker_layer: CircuitBreakerLayer,
 }
 
 impl ServerState {
     /// Create new server state
-    pub fn new(router: Router, config: ServerConfig) -> Self {
+    pub fn new(router: Router, config: ServerConfig, circuit_breaker_layer: CircuitBreakerLayer) -> Self {
         Self {
             router: Arc::new(router),
             config,
+            circuit_breaker_layer,
         }
     }
 }
@@ -106,12 +116,19 @@ pub struct GatewayServer {
     
     /// Health checker for monitoring service health
     health_checker: Arc<HealthChecker>,
+    
+    /// Circuit breaker layer for middleware integration
+    circuit_breaker_layer: CircuitBreakerLayer,
 }
 
 impl GatewayServer {
     /// Create a new HTTP server with separated admin and gateway routes
     pub fn new(router: Router, config: ServerConfig) -> Self {
-        let state = ServerState::new(router, config.clone());
+        // Create circuit breaker layer first
+        let circuit_breaker_layer = CircuitBreakerLayer::new(config.circuit_breaker.clone());
+        
+        // Create server state with circuit breaker layer
+        let state = ServerState::new(router, config.clone(), circuit_breaker_layer.clone());
         
         // Create health checker
         let health_checker = Arc::new(HealthChecker::new(None));
@@ -127,6 +144,7 @@ impl GatewayServer {
             .with_state(state.clone());
 
         // Add middleware layers to gateway app
+        // Note: Order matters - compression should be applied last (outermost)
         gateway_app = gateway_app.layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
@@ -138,13 +156,14 @@ impl GatewayServer {
         }
 
         // Create admin application for configuration management
-        let admin_app = Self::create_admin_app(state.clone());
+        let admin_app = Self::create_admin_app(state.clone(), circuit_breaker_layer.clone());
 
         Self { 
             state, 
             gateway_app,
             admin_app,
             health_checker,
+            circuit_breaker_layer,
         }
     }
 
@@ -190,7 +209,7 @@ impl GatewayServer {
     }
 
     /// Create the admin application with configuration management endpoints
-    fn create_admin_app(_state: ServerState) -> AxumRouter {
+    fn create_admin_app(_state: ServerState, circuit_breaker_layer: CircuitBreakerLayer) -> AxumRouter {
         // Create audit trail for configuration changes
         let audit = Arc::new(ConfigAudit::new(Some("audit.log".into())));
         
@@ -207,8 +226,18 @@ impl GatewayServer {
             load_balancer: None, // Load balancer management will be added when needed
         };
 
+        // Create circuit breaker admin state
+        let circuit_breaker_admin_state = CircuitBreakerAdminState::with_layer(
+            circuit_breaker_layer.registry(),
+            circuit_breaker_layer
+        );
+
         // Create admin router with all endpoints
         let mut admin_app = AdminRouter::create_router(admin_state);
+
+        // Add circuit breaker admin routes
+        let circuit_breaker_routes = CircuitBreakerAdminRouter::create_router(circuit_breaker_admin_state);
+        admin_app = admin_app.nest("/api/v1/admin", circuit_breaker_routes);
 
         // Add health check endpoints for admin interface
         admin_app = admin_app
@@ -353,27 +382,112 @@ async fn handle_request(
         
         context.set_route(route_match);
         
-        // TODO: In subsequent tasks, this is where we would:
-        // 1. Apply middleware pipeline
-        // 2. Perform authentication/authorization
-        // 3. Apply rate limiting
-        // 4. Load balance to upstream service
-        // 5. Forward request and get response
+        // Get the upstream service name for circuit breaker
+        let upstream_service = &context.route.as_ref().unwrap().upstream;
         
-        // For now, return a simple success response indicating the route was matched
-        let response_body = serde_json::json!({
-            "message": "Request routed successfully",
-            "route": {
-                "pattern": context.route.as_ref().unwrap().pattern,
-                "upstream": context.route.as_ref().unwrap().upstream,
-                "params": context.route.as_ref().unwrap().params,
-                "query_params": context.route.as_ref().unwrap().query_params,
-            },
-            "request_id": context.request.id,
-            "processing_time_ms": start_time.elapsed().as_millis(),
-        });
-
-        Ok(create_json_response(StatusCode::OK, response_body))
+        // Get or create circuit breaker for this upstream service
+        let circuit_breaker_config = state.config.circuit_breaker.service_configs
+            .get(upstream_service)
+            .cloned()
+            .unwrap_or(state.config.circuit_breaker.default_config.clone());
+        
+        let circuit_breaker = state.circuit_breaker_layer
+            .registry()
+            .get_or_create(upstream_service, circuit_breaker_config);
+        
+        // Check if request can proceed through circuit breaker
+        match circuit_breaker.can_proceed() {
+            Ok(()) => {
+                // Circuit breaker allows request to proceed
+                debug!(
+                    request_id = %context.request.id,
+                    upstream = %upstream_service,
+                    "Circuit breaker allows request to proceed"
+                );
+                
+                // Simulate upstream service call (in future tasks, this will be actual HTTP client call)
+                let upstream_call_result = simulate_upstream_call(upstream_service, &context).await;
+                
+                match upstream_call_result {
+                    Ok(response_data) => {
+                        // Record success with circuit breaker
+                        circuit_breaker.record_success();
+                        
+                        let response_body = serde_json::json!({
+                            "message": "Request processed successfully",
+                            "route": {
+                                "pattern": context.route.as_ref().unwrap().pattern,
+                                "upstream": context.route.as_ref().unwrap().upstream,
+                                "params": context.route.as_ref().unwrap().params,
+                                "query_params": context.route.as_ref().unwrap().query_params,
+                            },
+                            "upstream_response": response_data,
+                            "request_id": context.request.id,
+                            "processing_time_ms": start_time.elapsed().as_millis(),
+                            "circuit_breaker_state": format!("{:?}", circuit_breaker.state()),
+                        });
+                        
+                        Ok(create_json_response(StatusCode::OK, response_body))
+                    }
+                    Err(error) => {
+                        // Record failure with circuit breaker
+                        circuit_breaker.record_failure();
+                        
+                        warn!(
+                            request_id = %context.request.id,
+                            upstream = %upstream_service,
+                            error = %error,
+                            "Upstream service call failed"
+                        );
+                        
+                        Ok(create_error_response(
+                            StatusCode::BAD_GATEWAY,
+                            format!("Upstream service '{}' failed: {}", upstream_service, error),
+                        ))
+                    }
+                }
+            }
+            Err(crate::core::circuit_breaker::CircuitBreakerError::CircuitOpen) => {
+                // Circuit breaker is open, reject request immediately
+                warn!(
+                    request_id = %context.request.id,
+                    upstream = %upstream_service,
+                    "Circuit breaker is open, rejecting request"
+                );
+                
+                let error_body = serde_json::json!({
+                    "error": {
+                        "code": 503,
+                        "message": format!("Service '{}' is currently unavailable", upstream_service),
+                        "type": "CIRCUIT_BREAKER_OPEN",
+                        "upstream": upstream_service,
+                        "circuit_breaker_state": format!("{:?}", circuit_breaker.state()),
+                        "retry_after": "60s"
+                    },
+                    "request_id": context.request.id,
+                });
+                
+                let mut response = create_json_response(StatusCode::SERVICE_UNAVAILABLE, error_body);
+                response.headers_mut().insert("retry-after", "60".parse().unwrap());
+                response.headers_mut().insert("x-circuit-breaker", "open".parse().unwrap());
+                
+                Ok(response)
+            }
+            Err(error) => {
+                // Other circuit breaker error
+                warn!(
+                    request_id = %context.request.id,
+                    upstream = %upstream_service,
+                    error = %error,
+                    "Circuit breaker error"
+                );
+                
+                Ok(create_error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Circuit breaker error: {}", error),
+                ))
+            }
+        }
     } else {
         warn!(
             request_id = %context.request.id,
@@ -413,6 +527,76 @@ fn create_error_response(status: StatusCode, message: String) -> Response {
     });
 
     create_json_response(status, error_body)
+}
+
+/// Simulate upstream service call
+/// 
+/// This is a placeholder function that simulates calling an upstream service.
+/// In future tasks, this will be replaced with actual HTTP client calls through
+/// the load balancer and service discovery components.
+async fn simulate_upstream_call(
+    upstream_service: &str,
+    context: &RequestContext,
+) -> Result<serde_json::Value, String> {
+    // Simulate network delay
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    
+    // Simulate different response patterns based on service name
+    match upstream_service {
+        "user-service" => {
+            // Simulate occasional failures for testing circuit breaker
+            if context.request.uri.path().contains("fail") {
+                return Err("User service temporarily unavailable".to_string());
+            }
+            
+            Ok(serde_json::json!({
+                "service": "user-service",
+                "data": {
+                    "users": [
+                        {"id": 1, "name": "Alice"},
+                        {"id": 2, "name": "Bob"}
+                    ]
+                },
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            }))
+        }
+        "post-service" => {
+            // Simulate higher failure rate for post service
+            if context.request.uri.path().contains("error") || 
+               std::time::SystemTime::now()
+                   .duration_since(std::time::UNIX_EPOCH)
+                   .unwrap()
+                   .as_secs() % 5 == 0 {
+                return Err("Post service error".to_string());
+            }
+            
+            Ok(serde_json::json!({
+                "service": "post-service",
+                "data": {
+                    "posts": [
+                        {"id": 1, "title": "Hello World", "author": "Alice"},
+                        {"id": 2, "title": "Rust is Great", "author": "Bob"}
+                    ]
+                },
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            }))
+        }
+        "default-service" => {
+            Ok(serde_json::json!({
+                "service": "default-service",
+                "message": "Default service response",
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            }))
+        }
+        _ => {
+            // Unknown service
+            Ok(serde_json::json!({
+                "service": upstream_service,
+                "message": "Generic upstream response",
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            }))
+        }
+    }
 }
 
 /// Health check handler

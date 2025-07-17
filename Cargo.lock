@@ -112,6 +112,7 @@ dependencies = [
  "criterion",
  "dashmap",
  "flate2",
+ "futures",
  "hex",
  "humantime",
  "humantime-serde",

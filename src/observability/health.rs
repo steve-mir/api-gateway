@@ -156,14 +156,14 @@ impl HealthReport {
         let mut healthy_count = 0;
         let mut degraded_count = 0;
         let mut unhealthy_count = 0;
-        let mut unknown_count = 0;
+        let mut _unknown_count = 0;
 
         for check in checks.values() {
             match check.status {
                 ServiceStatus::Healthy => healthy_count += 1,
                 ServiceStatus::Degraded => degraded_count += 1,
                 ServiceStatus::Unhealthy => unhealthy_count += 1,
-                ServiceStatus::Unknown => unknown_count += 1,
+                ServiceStatus::Unknown => _unknown_count += 1,
             }
         }
 
@@ -501,7 +501,7 @@ impl HealthChecker {
         let mut result = self.http_probe.check(&config).await;
 
         // Update consecutive success/failure counts
-        if let Some(mut previous) = self.instance_results.get_mut(instance_id) {
+        if let Some(previous) = self.instance_results.get_mut(instance_id) {
             match result.status {
                 ServiceStatus::Healthy => {
                     result.consecutive_successes = previous.consecutive_successes + 1;
