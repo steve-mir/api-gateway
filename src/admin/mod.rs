@@ -35,9 +35,11 @@ pub mod audit;
 pub mod config_manager;
 pub mod service_management;
 pub mod load_balancer;
+pub mod health;
 
 pub use endpoints::{AdminRouter, AdminState};
 pub use audit::{ConfigAudit, ConfigChange, ConfigChangeType, AuditStatistics};
 pub use config_manager::{RuntimeConfigManager, ConfigChangeEvent};
 pub use service_management::{ServiceManagementRouter, ServiceManagementState, ServicePersistence};
 pub use load_balancer::{LoadBalancerAdminRouter, LoadBalancerAdminState};
+pub use health::{HealthAdminRouter, HealthAdminState};

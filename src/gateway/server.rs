@@ -18,6 +18,7 @@ use crate::core::types::{IncomingRequest, RequestContext, Protocol};
 use crate::admin::{AdminRouter, AdminState};
 use crate::admin::config_manager::RuntimeConfigManager;
 use crate::admin::audit::ConfigAudit;
+use crate::observability::health::{HealthChecker, HealthCheckConfig};
 use axum::{
     body::Body,
     extract::{Request, State},
@@ -102,6 +103,9 @@ pub struct GatewayServer {
     
     /// Axum application router for admin routes
     admin_app: AxumRouter,
+    
+    /// Health checker for monitoring service health
+    health_checker: Arc<HealthChecker>,
 }
 
 impl GatewayServer {
@@ -109,9 +113,17 @@ impl GatewayServer {
     pub fn new(router: Router, config: ServerConfig) -> Self {
         let state = ServerState::new(router, config.clone());
         
+        // Create health checker
+        let health_checker = Arc::new(HealthChecker::new(None));
+        
+        // Add default gateway health checks
+        Self::setup_default_health_checks(&health_checker, &config);
+        
         // Build the gateway application for handling API requests
         let mut gateway_app = AxumRouter::new()
             .route("/*path", any(handle_request))
+            .route("/health", axum::routing::get(gateway_health_check))
+            .route("/ready", axum::routing::get(gateway_readiness_check))
             .with_state(state.clone());
 
         // Add middleware layers to gateway app
@@ -132,7 +144,49 @@ impl GatewayServer {
             state, 
             gateway_app,
             admin_app,
+            health_checker,
         }
+    }
+
+    /// Setup default health checks for the gateway
+    fn setup_default_health_checks(health_checker: &Arc<HealthChecker>, config: &ServerConfig) {
+        // Add self-health check for the gateway
+        let gateway_health_config = HealthCheckConfig {
+            name: "gateway-self".to_string(),
+            url: format!("http://{}/health", config.bind_addr),
+            method: "GET".to_string(),
+            headers: std::collections::HashMap::new(),
+            body: None,
+            interval: std::time::Duration::from_secs(30),
+            timeout: std::time::Duration::from_secs(5),
+            healthy_threshold: 1,
+            unhealthy_threshold: 3,
+            expected_status_codes: vec![200],
+            expected_body_content: None,
+            critical: true,
+            enabled: true,
+        };
+        
+        health_checker.add_gateway_health_check("self".to_string(), gateway_health_config);
+        
+        // Add admin interface health check
+        let admin_health_config = HealthCheckConfig {
+            name: "admin-interface".to_string(),
+            url: format!("http://{}/health", config.admin_bind_addr),
+            method: "GET".to_string(),
+            headers: std::collections::HashMap::new(),
+            body: None,
+            interval: std::time::Duration::from_secs(60),
+            timeout: std::time::Duration::from_secs(5),
+            healthy_threshold: 1,
+            unhealthy_threshold: 3,
+            expected_status_codes: vec![200],
+            expected_body_content: None,
+            critical: false,
+            enabled: true,
+        };
+        
+        health_checker.add_gateway_health_check("admin".to_string(), admin_health_config);
     }
 
     /// Create the admin application with configuration management endpoints
@@ -383,6 +437,33 @@ pub async fn readiness_check() -> impl IntoResponse {
         "checks": {
             "router": "ok",
             // Future: "database": "ok", "upstream_services": "ok", etc.
+        }
+    });
+
+    (StatusCode::OK, axum::Json(readiness_info))
+}
+
+/// Gateway health check handler
+pub async fn gateway_health_check() -> impl IntoResponse {
+    let health_info = serde_json::json!({
+        "status": "healthy",
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "version": env!("CARGO_PKG_VERSION"),
+        "service": "gateway"
+    });
+
+    (StatusCode::OK, axum::Json(health_info))
+}
+
+/// Gateway readiness check handler
+pub async fn gateway_readiness_check() -> impl IntoResponse {
+    let readiness_info = serde_json::json!({
+        "status": "ready",
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "service": "gateway",
+        "checks": {
+            "router": "ok",
+            // Future: "load_balancer": "ok", "upstream_services": "ok", etc.
         }
     });
 
