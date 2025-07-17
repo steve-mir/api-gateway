@@ -2,7 +2,7 @@
 # This is a basic configuration file for development
 
 server:
-  http_port: 8080
+  http_port: 8082
   https_port: 8443
   metrics_port: 9090
   bind_address: "0.0.0.0"

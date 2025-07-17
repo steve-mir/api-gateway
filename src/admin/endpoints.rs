@@ -11,7 +11,7 @@
 //! These endpoints should be protected with appropriate authentication and authorization
 //! as they can modify the gateway's behavior.
 
-use crate::core::{config::GatewayConfig, error::{GatewayResult, GatewayError}};
+use crate::core::config::GatewayConfig;
 use crate::admin::{ConfigAudit, ConfigChange, ConfigChangeType, RuntimeConfigManager};
 use axum::{
     extract::{Path, Query, State},

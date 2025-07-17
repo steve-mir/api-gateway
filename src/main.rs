@@ -53,7 +53,7 @@ async fn main() -> GatewayResult<()> {
     info!("Starting API Gateway...");
 
     // Load configuration
-    let _config = GatewayConfig::load_from_file("config/gateway.yaml").await?;
+    let config = GatewayConfig::load_from_file("config/gateway.yaml").await?;
     info!("Configuration loaded successfully");
 
     // Create a basic router with some example routes for testing
@@ -72,9 +72,9 @@ async fn main() -> GatewayResult<()> {
         .default_route("default-service")
         .build();
 
-    // Create server configuration with separate admin and gateway ports
+    // Create server configuration using the loaded config
     let server_config = ServerConfig {
-        bind_addr: "127.0.0.1:8080".parse().unwrap(),  // Gateway routes
+        bind_addr: format!("{}:{}", config.server.bind_address, config.server.http_port).parse().unwrap(),
         admin_bind_addr: "127.0.0.1:8081".parse().unwrap(),  // Admin routes
         ..Default::default()
     };

@@ -136,7 +136,7 @@ impl GatewayServer {
     }
 
     /// Create the admin application with configuration management endpoints
-    fn create_admin_app(state: ServerState) -> AxumRouter {
+    fn create_admin_app(_state: ServerState) -> AxumRouter {
         // Create audit trail for configuration changes
         let audit = Arc::new(ConfigAudit::new(Some("audit.log".into())));
         

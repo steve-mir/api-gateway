@@ -24,6 +24,7 @@
   - Build basic routing system using radix tree for path matching
   - Add support for path parameters, query strings, and wildcards in routes
   - Implement request context creation and propagation
+  - Add admin route seperation from gateway routes
   - Write integration tests for basic HTTP request handling
   - _Requirements: 1.1, 1.2, 6.1_
 
@@ -39,8 +40,10 @@
   - Write unit tests for service discovery components
   - _Requirements: 2.1, 2.3, 13.2_
 
+
 - [ ] 6. Basic HTTP Server and Request Handling
-  - Add admin route seperation from gateway routes
+  - Add admin APIs for manual service registration/deregistration
+  - Create service registry persistence for admin-added services
   
 - [ ] 5. Load Balancing Implementation 2
   - Create LoadBalancer trait with pluggable algorithm support
@@ -48,6 +51,8 @@
   - Build least connections balancer using concurrent connection tracking
   - Add weighted load balancing with configurable weights
   - Implement consistent hashing for session affinity
+  - Add admin endpoints for load balancer algorithm switching
+  - Create load balancer metrics and statistics for admin dashboard
   - Write comprehensive tests for all load balancing algorithms
   - _Requirements: 2.2, 2.4_
 
