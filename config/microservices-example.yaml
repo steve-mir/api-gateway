@@ -1,0 +1,491 @@
+# Example Gateway Configuration for Microservices Architecture
+# This configuration demonstrates integration with external auth service and other microservices
+
+server:
+  http_port: 8080
+  https_port: 8443
+  metrics_port: 9090
+  bind_address: "0.0.0.0"
+  timeouts:
+    request_timeout: "30s"
+    keepalive_timeout: "60s"
+    upstream_timeout: "15s"
+  max_request_size: 10485760  # 10MB
+
+# Route definitions - organized by service responsibility
+routes:
+  # ===========================================
+  # AUTH SERVICE ROUTES (Public - No Auth Required)
+  # ===========================================
+  
+  # User registration
+  - path: "/auth/register"
+    methods: ["POST"]
+    upstream: "auth-service"
+    auth_required: false
+    timeout: "10s"
+    middleware: ["rate_limit_strict"]
+
+  # User login
+  - path: "/auth/login"
+    methods: ["POST"]
+    upstream: "auth-service"
+    auth_required: false
+    timeout: "10s"
+    middleware: ["rate_limit_strict"]
+
+  # Token refresh
+  - path: "/auth/refresh"
+    methods: ["POST"]
+    upstream: "auth-service"
+    auth_required: false
+    timeout: "10s"
+    middleware: ["rate_limit_moderate"]
+
+  # Password reset request
+  - path: "/auth/forgot-password"
+    methods: ["POST"]
+    upstream: "auth-service"
+    auth_required: false
+    timeout: "10s"
+    middleware: ["rate_limit_strict"]
+
+  # Password reset confirmation
+  - path: "/auth/reset-password"
+    methods: ["POST"]
+    upstream: "auth-service"
+    auth_required: false
+    timeout: "10s"
+    middleware: ["rate_limit_strict"]
+
+  # Email verification
+  - path: "/auth/verify-email"
+    methods: ["POST", "GET"]
+    upstream: "auth-service"
+    auth_required: false
+    timeout: "10s"
+
+  # ===========================================
+  # USER SERVICE ROUTES (Protected)
+  # ===========================================
+
+  # Get current user profile
+  - path: "/api/v1/users/me"
+    methods: ["GET"]
+    upstream: "user-service"
+    auth_required: true
+    required_roles: ["user"]
+    timeout: "15s"
+
+  # Update current user profile
+  - path: "/api/v1/users/me"
+    methods: ["PUT", "PATCH"]
+    upstream: "user-service"
+    auth_required: true
+    required_roles: ["user"]
+    timeout: "20s"
+
+  # Delete current user account
+  - path: "/api/v1/users/me"
+    methods: ["DELETE"]
+    upstream: "user-service"
+    auth_required: true
+    required_roles: ["user"]
+    timeout: "20s"
+
+  # Get user by ID (public profiles)
+  - path: "/api/v1/users/{id}"
+    methods: ["GET"]
+    upstream: "user-service"
+    auth_required: true
+    required_roles: ["user"]
+    timeout: "15s"
+
+  # List users (with pagination)
+  - path: "/api/v1/users"
+    methods: ["GET"]
+    upstream: "user-service"
+    auth_required: true
+    required_roles: ["user"]
+    timeout: "20s"
+
+  # Upload user avatar
+  - path: "/api/v1/users/me/avatar"
+    methods: ["POST", "PUT"]
+    upstream: "user-service"
+    auth_required: true
+    required_roles: ["user"]
+    timeout: "30s"
+
+  # ===========================================
+  # ADMIN ROUTES (Admin Only)
+  # ===========================================
+
+  # Admin user management
+  - path: "/api/v1/admin/users"
+    methods: ["GET", "POST"]
+    upstream: "user-service"
+    auth_required: true
+    required_roles: ["admin"]
+    timeout: "30s"
+
+  - path: "/api/v1/admin/users/{id}"
+    methods: ["GET", "PUT", "DELETE"]
+    upstream: "user-service"
+    auth_required: true
+    required_roles: ["admin"]
+    timeout: "30s"
+
+  # Admin system metrics
+  - path: "/api/v1/admin/metrics"
+    methods: ["GET"]
+    upstream: "metrics-service"
+    auth_required: true
+    required_roles: ["admin"]
+    timeout: "15s"
+
+  # Admin system health
+  - path: "/api/v1/admin/health"
+    methods: ["GET"]
+    upstream: "health-service"
+    auth_required: true
+    required_roles: ["admin"]
+    timeout: "10s"
+
+  # ===========================================
+  # METRICS SERVICE ROUTES
+  # ===========================================
+
+  # User-specific metrics
+  - path: "/api/v1/metrics/user"
+    methods: ["GET"]
+    upstream: "metrics-service"
+    auth_required: true
+    required_roles: ["user"]
+    timeout: "15s"
+
+  # Application metrics (for dashboards)
+  - path: "/api/v1/metrics/app"
+    methods: ["GET"]
+    upstream: "metrics-service"
+    auth_required: true
+    required_roles: ["user", "admin"]
+    timeout: "15s"
+
+  # ===========================================
+  # NOTIFICATION SERVICE ROUTES
+  # ===========================================
+
+  # Get user notifications
+  - path: "/api/v1/notifications"
+    methods: ["GET"]
+    upstream: "notification-service"
+    auth_required: true
+    required_roles: ["user"]
+    timeout: "15s"
+
+  # Mark notification as read
+  - path: "/api/v1/notifications/{id}/read"
+    methods: ["PUT"]
+    upstream: "notification-service"
+    auth_required: true
+    required_roles: ["user"]
+    timeout: "10s"
+
+  # Send notification (admin only)
+  - path: "/api/v1/notifications/send"
+    methods: ["POST"]
+    upstream: "notification-service"
+    auth_required: true
+    required_roles: ["admin"]
+    timeout: "20s"
+
+  # ===========================================
+  # HEALTH AND MONITORING (Public)
+  # ===========================================
+
+  # Gateway health check
+  - path: "/health"
+    methods: ["GET"]
+    upstream: "health-service"
+    auth_required: false
+    timeout: "5s"
+
+  # Gateway readiness check
+  - path: "/ready"
+    methods: ["GET"]
+    upstream: "health-service"
+    auth_required: false
+    timeout: "5s"
+
+  # Service status (public)
+  - path: "/status"
+    methods: ["GET"]
+    upstream: "health-service"
+    auth_required: false
+    timeout: "10s"
+
+# ===========================================
+# UPSTREAM SERVICE DEFINITIONS
+# ===========================================
+
+upstreams:
+  # Authentication Service
+  auth-service:
+    discovery:
+      type: "Static"
+      endpoints: 
+        - "http://auth-service:3001"
+        - "http://auth-service-2:3001"  # Multiple instances for HA
+    load_balancer:
+      type: "RoundRobin"
+    health_check:
+      path: "/health"
+      interval: "30s"
+      timeout: "5s"
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+    circuit_breaker:
+      failure_threshold: 5
+      timeout: "60s"
+      success_threshold: 3
+    retry_policy:
+      max_attempts: 3
+      base_delay: "100ms"
+      max_delay: "5s"
+      backoff_multiplier: 2.0
+      retryable_status_codes: [502, 503, 504]
+
+  # User Management Service
+  user-service:
+    discovery:
+      type: "Static"
+      endpoints: 
+        - "http://user-service:3002"
+        - "http://user-service-2:3002"
+    load_balancer:
+      type: "LeastConnections"  # Better for user-specific operations
+    health_check:
+      path: "/health"
+      interval: "30s"
+      timeout: "5s"
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+    circuit_breaker:
+      failure_threshold: 5
+      timeout: "60s"
+      success_threshold: 3
+    retry_policy:
+      max_attempts: 2
+      base_delay: "200ms"
+      max_delay: "3s"
+      backoff_multiplier: 2.0
+      retryable_status_codes: [502, 503, 504]
+
+  # Metrics and Analytics Service
+  metrics-service:
+    discovery:
+      type: "Static"
+      endpoints: 
+        - "http://metrics-service:3003"
+    load_balancer:
+      type: "RoundRobin"
+    health_check:
+      path: "/health"
+      interval: "30s"
+      timeout: "5s"
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+    circuit_breaker:
+      failure_threshold: 3
+      timeout: "30s"
+      success_threshold: 2
+
+  # Notification Service
+  notification-service:
+    discovery:
+      type: "Static"
+      endpoints: 
+        - "http://notification-service:3004"
+    load_balancer:
+      type: "RoundRobin"
+    health_check:
+      path: "/health"
+      interval: "30s"
+      timeout: "5s"
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+
+  # Health Check Service
+  health-service:
+    discovery:
+      type: "Static"
+      endpoints: 
+        - "http://health-service:3005"
+    load_balancer:
+      type: "RoundRobin"
+    health_check:
+      path: "/ping"
+      interval: "15s"
+      timeout: "3s"
+      healthy_threshold: 1
+      unhealthy_threshold: 2
+
+# ===========================================
+# MIDDLEWARE CONFIGURATION
+# ===========================================
+
+middleware:
+  # Rate Limiting with Redis for distributed setup
+  rate_limiting:
+    default_limit: 1000  # requests per minute
+    route_limits:
+      # Strict limits for auth endpoints
+      "/auth/login": 10
+      "/auth/register": 5
+      "/auth/forgot-password": 3
+      "/auth/reset-password": 3
+      
+      # Moderate limits for user operations
+      "/api/v1/users/me": 60
+      "/api/v1/users": 100
+      
+      # Generous limits for read operations
+      "/api/v1/metrics": 200
+      "/api/v1/notifications": 120
+      
+      # Admin endpoints
+      "/api/v1/admin/*": 50
+    storage:
+      type: "Redis"
+      url: "redis://redis:6379/0"
+
+  # CORS Configuration
+  cors:
+    allowed_origins: 
+      - "https://yourdomain.com"
+      - "https://app.yourdomain.com"
+      - "http://localhost:3000"  # For development
+      - "http://localhost:3001"
+    allowed_methods: 
+      - "GET"
+      - "POST" 
+      - "PUT"
+      - "PATCH"
+      - "DELETE"
+      - "OPTIONS"
+    allowed_headers: 
+      - "Content-Type"
+      - "Authorization"
+      - "X-Requested-With"
+      - "X-User-Agent"
+    max_age: 3600
+
+  # Request/Response Transformation
+  transformation:
+    request:
+      - name: "add_request_id"
+        transform_type: "AddHeader"
+        config:
+          header_name: "X-Request-ID"
+          header_value: "${request_id}"
+      
+      - name: "add_forwarded_for"
+        transform_type: "AddHeader"
+        config:
+          header_name: "X-Forwarded-For"
+          header_value: "${client_ip}"
+
+    response:
+      - name: "add_server_header"
+        transform_type: "AddHeader"
+        config:
+          header_name: "X-Powered-By"
+          header_value: "API-Gateway/1.0"
+
+# ===========================================
+# AUTHENTICATION CONFIGURATION
+# ===========================================
+
+auth:
+  # JWT Configuration (shared secret with auth service)
+  jwt:
+    secret: "${JWT_SECRET}"  # Must match auth service
+    algorithm: "HS256"
+    issuer: "auth-service"
+    audience: "api-gateway"
+    expiration: "1h"
+
+  # API Key Configuration (for service-to-service)
+  api_key:
+    header_name: "X-API-Key"
+    keys:
+      "service_user_key_123": 
+        name: "User Service"
+        roles: ["service"]
+        rate_limit: 5000
+      
+      "service_metrics_key_456":
+        name: "Metrics Service" 
+        roles: ["service"]
+        rate_limit: 2000
+      
+      "admin_key_789":
+        name: "Admin Dashboard"
+        roles: ["admin"]
+        rate_limit: 1000
+
+# ===========================================
+# OBSERVABILITY CONFIGURATION
+# ===========================================
+
+observability:
+  # Prometheus Metrics
+  metrics:
+    prometheus_enabled: true
+    endpoint_path: "/metrics"
+    custom_metrics:
+      - name: "gateway_requests_by_service"
+        metric_type: "counter"
+        description: "Total requests by upstream service"
+        labels: ["service", "method", "status"]
+      
+      - name: "gateway_request_duration_by_service"
+        metric_type: "histogram"
+        description: "Request duration by upstream service"
+        labels: ["service", "method"]
+      
+      - name: "gateway_auth_failures"
+        metric_type: "counter"
+        description: "Authentication failures by type"
+        labels: ["auth_type", "reason"]
+
+  # Structured Logging
+  logging:
+    level: "info"
+    format: "json"
+    output:
+      type: "Stdout"
+
+  # Distributed Tracing
+  tracing:
+    enabled: true
+    backend:
+      type: "Jaeger"
+      endpoint: "http://jaeger-collector:14268/api/traces"
+    sampling_rate: 0.1  # 10% sampling in production
+
+# ===========================================
+# SERVICE DISCOVERY CONFIGURATION
+# ===========================================
+
+service_discovery:
+  # Kubernetes Service Discovery (if running in K8s)
+  kubernetes:
+    default_namespace: "microservices"
+    watch_all_namespaces: false
+    
+  # Consul Service Discovery (alternative)
+  # consul:
+  #   address: "http://consul:8500"
+  #   datacenter: "dc1"

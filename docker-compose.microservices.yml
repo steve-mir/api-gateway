@@ -1,0 +1,342 @@
+# Docker Compose for Microservices Architecture with API Gateway
+# This demonstrates a complete setup with external auth service and other microservices
+
+version: '3.8'
+
+services:
+  # ===========================================
+  # API GATEWAY (This Rust Gateway)
+  # ===========================================
+  api-gateway:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"   # Main API port
+      - "8081:8081"   # Admin interface
+      - "9090:9090"   # Metrics port
+    environment:
+      # Server configuration
+      - GATEWAY_SERVER_HTTP_PORT=8080
+      - GATEWAY_SERVER_BIND_ADDRESS=0.0.0.0
+      - GATEWAY_LOG_LEVEL=info
+      - GATEWAY_METRICS_ENABLED=true
+      
+      # JWT configuration (shared with auth service)
+      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+      
+      # Redis for rate limiting
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./config/microservices-example.yaml:/app/config/gateway.yaml:ro
+    depends_on:
+      - redis
+      - auth-service
+      - user-service
+      - metrics-service
+    networks:
+      - microservices
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # AUTHENTICATION SERVICE
+  # ===========================================
+  auth-service:
+    image: node:18-alpine  # Example with Node.js
+    working_dir: /app
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+      - JWT_EXPIRES_IN=1h
+      - DATABASE_URL=postgresql://auth_user:auth_pass@postgres:5432/auth_db
+      - REDIS_URL=redis://redis:6379/1
+      - BCRYPT_ROUNDS=12
+    volumes:
+      - ./services/auth-service:/app:ro
+      - /app/node_modules
+    command: ["npm", "start"]
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - microservices
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # USER MANAGEMENT SERVICE
+  # ===========================================
+  user-service:
+    image: python:3.11-slim  # Example with Python/FastAPI
+    working_dir: /app
+    ports:
+      - "3002:3002"
+    environment:
+      - PYTHONPATH=/app
+      - PORT=3002
+      - DATABASE_URL=postgresql://user_user:user_pass@postgres:5432/user_db
+      - REDIS_URL=redis://redis:6379/2
+      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+      - FILE_UPLOAD_PATH=/app/uploads
+      - MAX_FILE_SIZE=10485760  # 10MB
+    volumes:
+      - ./services/user-service:/app:ro
+      - user_uploads:/app/uploads
+    command: ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3002"]
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - microservices
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # METRICS AND ANALYTICS SERVICE
+  # ===========================================
+  metrics-service:
+    image: golang:1.21-alpine  # Example with Go
+    working_dir: /app
+    ports:
+      - "3003:3003"
+    environment:
+      - PORT=3003
+      - DATABASE_URL=postgresql://metrics_user:metrics_pass@postgres:5432/metrics_db
+      - REDIS_URL=redis://redis:6379/3
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=your-influxdb-token
+      - INFLUXDB_ORG=your-org
+      - INFLUXDB_BUCKET=metrics
+    volumes:
+      - ./services/metrics-service:/app:ro
+    command: ["go", "run", "main.go"]
+    depends_on:
+      - postgres
+      - redis
+      - influxdb
+    networks:
+      - microservices
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # NOTIFICATION SERVICE
+  # ===========================================
+  notification-service:
+    image: node:18-alpine
+    working_dir: /app
+    ports:
+      - "3004:3004"
+    environment:
+      - NODE_ENV=production
+      - PORT=3004
+      - DATABASE_URL=postgresql://notification_user:notification_pass@postgres:5432/notification_db
+      - REDIS_URL=redis://redis:6379/4
+      - SMTP_HOST=smtp.gmail.com
+      - SMTP_PORT=587
+      - SMTP_USER=your-email@gmail.com
+      - SMTP_PASS=your-app-password
+      - PUSH_NOTIFICATION_KEY=your-fcm-key
+    volumes:
+      - ./services/notification-service:/app:ro
+      - /app/node_modules
+    command: ["npm", "start"]
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - microservices
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # HEALTH CHECK SERVICE
+  # ===========================================
+  health-service:
+    image: nginx:alpine
+    ports:
+      - "3005:80"
+    volumes:
+      - ./services/health-service/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./services/health-service/html:/usr/share/nginx/html:ro
+    networks:
+      - microservices
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 2
+
+  # ===========================================
+  # DATABASE SERVICES
+  # ===========================================
+  postgres:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=microservices
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - microservices
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - microservices
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # MONITORING AND OBSERVABILITY
+  # ===========================================
+  
+  # Time series database for metrics
+  influxdb:
+    image: influxdb:2.7
+    ports:
+      - "8086:8086"
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=admin_password
+      - DOCKER_INFLUXDB_INIT_ORG=your-org
+      - DOCKER_INFLUXDB_INIT_BUCKET=metrics
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=your-influxdb-token
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    networks:
+      - microservices
+    restart: unless-stopped
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - microservices
+    restart: unless-stopped
+
+  # Grafana for metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin_password
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - microservices
+    restart: unless-stopped
+
+  # Jaeger for distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # HTTP collector
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - microservices
+    restart: unless-stopped
+
+  # ===========================================
+  # LOAD BALANCER (Optional - for production)
+  # ===========================================
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - api-gateway
+    networks:
+      - microservices
+    restart: unless-stopped
+
+# ===========================================
+# NETWORKS AND VOLUMES
+# ===========================================
+networks:
+  microservices:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  influxdb_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  user_uploads:
+    driver: local

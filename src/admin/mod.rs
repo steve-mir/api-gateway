@@ -39,6 +39,7 @@ pub mod health;
 pub mod rate_limiting;
 pub mod circuit_breaker;
 pub mod transformation;
+pub mod grpc_management;
 
 pub use endpoints::{AdminRouter, AdminState};
 pub use audit::{ConfigAudit, ConfigChange, ConfigChangeType, AuditStatistics};
@@ -49,3 +50,4 @@ pub use health::{HealthAdminRouter, HealthAdminState};
 pub use rate_limiting::{RateLimitAdminRouter, RateLimitAdminState};
 pub use circuit_breaker::{CircuitBreakerAdminRouter, CircuitBreakerAdminState};
 pub use transformation::{TransformationAdminRouter, TransformationAdminState};
+pub use grpc_management::{GrpcAdminRouter, GrpcAdminState};

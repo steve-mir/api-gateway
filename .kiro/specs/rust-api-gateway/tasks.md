@@ -107,7 +107,7 @@
   - Write tests for various transformation scenarios
   - _Requirements: 1.3, 1.5, 9.4_
 
-- [ ] 11. gRPC Protocol Support
+- [x] 11. gRPC Protocol Support
   - Implement gRPC service detection and routing using tonic
   - Build unary RPC call handling with proper error mapping
   - Add server streaming support with connection management
@@ -118,6 +118,13 @@
   - Add admin endpoints for gRPC service management and monitoring
   - Write comprehensive gRPC integration tests
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6_
+
+- [ ] 11.2. gRPC Protocol Support
+  - Fix stream type detection logic
+  - Implement proper streaming body parsing
+  - Add real tonic client integration
+  - Implement proper backpressure handling
+  - Add streaming-specific connection management
 
 - [ ] 12. WebSocket Protocol Support
   - Implement WebSocket upgrade handling using tokio-tungstenite
