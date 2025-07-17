@@ -19,8 +19,11 @@ use crate::admin::{AdminRouter, AdminState};
 use crate::admin::config_manager::RuntimeConfigManager;
 use crate::admin::audit::ConfigAudit;
 use crate::admin::circuit_breaker::{CircuitBreakerAdminRouter, CircuitBreakerAdminState};
+
 use crate::observability::health::{HealthChecker, HealthCheckConfig};
 use crate::middleware::circuit_breaker::{CircuitBreakerLayer, CircuitBreakerMiddlewareConfig};
+use crate::middleware::transformation::TransformationLayer;
+use crate::core::config::TransformationConfig;
 use axum::{
     body::Body,
     extract::{Request, State},
@@ -63,6 +66,9 @@ pub struct ServerConfig {
     
     /// Circuit breaker configuration
     pub circuit_breaker: CircuitBreakerMiddlewareConfig,
+    
+    /// Request/response transformation configuration
+    pub transformation: Option<TransformationConfig>,
 }
 
 impl Default for ServerConfig {
@@ -75,6 +81,7 @@ impl Default for ServerConfig {
             enable_compression: true,
             enable_cors: true,
             circuit_breaker: CircuitBreakerMiddlewareConfig::default(),
+            transformation: None,
         }
     }
 }
@@ -145,11 +152,24 @@ impl GatewayServer {
 
         // Add middleware layers to gateway app
         // Note: Order matters - compression should be applied last (outermost)
-        gateway_app = gateway_app.layer(
-            ServiceBuilder::new()
-                .layer(TraceLayer::new_for_http())
-                .layer(CompressionLayer::new())
-        );
+        let service_builder = ServiceBuilder::new()
+            .layer(TraceLayer::new_for_http())
+            .layer(CompressionLayer::new());
+
+        // Add transformation layer if configured
+        if let Some(ref transformation_config) = config.transformation {
+            match TransformationLayer::new(transformation_config) {
+                Ok(transformation_layer) => {
+                    info!("Adding transformation middleware to gateway pipeline");
+                    gateway_app = gateway_app.layer(transformation_layer);
+                }
+                Err(e) => {
+                    warn!("Failed to create transformation layer: {}", e);
+                }
+            }
+        }
+
+        gateway_app = gateway_app.layer(service_builder);
 
         if config.enable_cors {
             gateway_app = gateway_app.layer(CorsLayer::permissive());

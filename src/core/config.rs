@@ -629,7 +629,7 @@ pub struct TransformationRule {
 }
 
 /// Transformation types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TransformationType {
     AddHeader,
     RemoveHeader,
