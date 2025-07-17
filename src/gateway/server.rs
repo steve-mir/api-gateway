@@ -149,6 +149,7 @@ impl GatewayServer {
         let admin_state = AdminState {
             config_manager,
             audit,
+            service_management: None, // Service management will be added in future tasks
         };
 
         // Create admin router with all endpoints

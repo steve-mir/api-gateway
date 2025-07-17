@@ -37,13 +37,10 @@
   - Create ServiceInstance data structure with health status tracking
   - Build service registry with thread-safe concurrent access using DashMap
   - Add service change notification system using tokio channels
-  - Write unit tests for service discovery components
-  - _Requirements: 2.1, 2.3, 13.2_
-
-
-- [ ] 6. Basic HTTP Server and Request Handling
   - Add admin APIs for manual service registration/deregistration
   - Create service registry persistence for admin-added services
+  - Write unit tests for service discovery components
+  - _Requirements: 2.1, 2.3, 13.2_
   
 - [ ] 5. Load Balancing Implementation 2
   - Create LoadBalancer trait with pluggable algorithm support

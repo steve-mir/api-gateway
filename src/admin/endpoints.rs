@@ -12,7 +12,7 @@
 //! as they can modify the gateway's behavior.
 
 use crate::core::config::GatewayConfig;
-use crate::admin::{ConfigAudit, ConfigChange, ConfigChangeType, RuntimeConfigManager};
+use crate::admin::{ConfigAudit, ConfigChange, ConfigChangeType, RuntimeConfigManager, ServiceManagementRouter, ServiceManagementState};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -31,6 +31,7 @@ use chrono::{DateTime, Utc};
 pub struct AdminState {
     pub config_manager: Arc<RuntimeConfigManager>,
     pub audit: Arc<ConfigAudit>,
+    pub service_management: Option<ServiceManagementState>,
 }
 
 /// Admin router for configuration management endpoints
@@ -39,7 +40,7 @@ pub struct AdminRouter;
 impl AdminRouter {
     /// Create the admin router with all endpoints
     pub fn create_router(state: AdminState) -> Router {
-        Router::new()
+        let mut router = Router::new()
             // Configuration endpoints
             .route("/config", get(get_current_config))
             .route("/config", put(update_full_config))
@@ -68,7 +69,14 @@ impl AdminRouter {
             
             // Health and status endpoints
             .route("/status", get(get_admin_status))
-            .with_state(state)
+            .with_state(state.clone());
+
+        // Add service management routes if service management is enabled
+        if let Some(service_management_state) = state.service_management {
+            router = router.nest("/services", ServiceManagementRouter::create_router(service_management_state));
+        }
+
+        router
     }
 }
 
