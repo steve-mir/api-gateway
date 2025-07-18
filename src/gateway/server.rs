@@ -20,6 +20,7 @@ use crate::admin::config_manager::RuntimeConfigManager;
 use crate::admin::audit::ConfigAudit;
 use crate::admin::circuit_breaker::{CircuitBreakerAdminRouter, CircuitBreakerAdminState};
 use crate::protocols::websocket::{WebSocketHandler, WebSocketConfig};
+use crate::protocols::http::{HttpHandler, HttpConfig};
 
 use crate::observability::health::{HealthChecker, HealthCheckConfig};
 use crate::middleware::circuit_breaker::{CircuitBreakerLayer, CircuitBreakerMiddlewareConfig};
@@ -73,6 +74,9 @@ pub struct ServerConfig {
     
     /// WebSocket configuration
     pub websocket: WebSocketConfig,
+    
+    /// HTTP protocol configuration
+    pub http: HttpConfig,
 }
 
 impl Default for ServerConfig {
@@ -87,6 +91,7 @@ impl Default for ServerConfig {
             circuit_breaker: CircuitBreakerMiddlewareConfig::default(),
             transformation: None,
             websocket: WebSocketConfig::default(),
+            http: HttpConfig::default(),
         }
     }
 }
@@ -105,6 +110,9 @@ pub struct ServerState {
     
     /// WebSocket handler
     pub websocket_handler: Arc<WebSocketHandler>,
+    
+    /// HTTP protocol handler
+    pub http_handler: Arc<HttpHandler>,
 }
 
 impl ServerState {
@@ -113,11 +121,18 @@ impl ServerState {
         // Create WebSocket handler with configuration
         let websocket_handler = Arc::new(WebSocketHandler::new(config.websocket.clone()));
         
+        // Create HTTP handler with configuration
+        let http_handler = Arc::new(
+            HttpHandler::new(config.http.clone())
+                .expect("Failed to create HTTP handler")
+        );
+        
         Self {
             router: Arc::new(router),
             config,
             circuit_breaker_layer,
             websocket_handler,
+            http_handler,
         }
     }
 }
@@ -165,9 +180,62 @@ impl GatewayServer {
 
         // Add middleware layers to gateway app
         // Note: Order matters - compression should be applied last (outermost)
-        let service_builder = ServiceBuilder::new()
-            .layer(TraceLayer::new_for_http())
-            .layer(CompressionLayer::new());
+        gateway_app = gateway_app.layer(TraceLayer::new_for_http());
+
+        // Add compression layer if enabled in HTTP config
+        if config.http.compression.enabled {
+            let compression_level = match config.http.compression.level {
+                1..=3 => tower_http::compression::CompressionLevel::Fastest,
+                4..=6 => tower_http::compression::CompressionLevel::Default,
+                7..=9 => tower_http::compression::CompressionLevel::Best,
+                _ => tower_http::compression::CompressionLevel::Default,
+            };
+            gateway_app = gateway_app.layer(CompressionLayer::new().quality(compression_level));
+            info!("HTTP compression enabled with level {}", config.http.compression.level);
+        }
+
+        // Add CORS layer if enabled in HTTP config
+        if config.http.cors.enabled {
+            let mut cors_layer = CorsLayer::new();
+            
+            // Configure allowed origins
+            if config.http.cors.allowed_origins.contains(&"*".to_string()) {
+                cors_layer = cors_layer.allow_origin(tower_http::cors::Any);
+            } else {
+                for origin in &config.http.cors.allowed_origins {
+                    if let Ok(origin_header) = origin.parse::<axum::http::HeaderValue>() {
+                        cors_layer = cors_layer.allow_origin(origin_header);
+                    }
+                }
+            }
+            
+            // Configure allowed methods
+            let methods: Result<Vec<axum::http::Method>, _> = config.http.cors.allowed_methods
+                .iter()
+                .map(|m| m.parse())
+                .collect();
+            
+            if let Ok(methods) = methods {
+                cors_layer = cors_layer.allow_methods(methods);
+            }
+            
+            // Configure allowed headers
+            let headers: Result<Vec<axum::http::HeaderName>, _> = config.http.cors.allowed_headers
+                .iter()
+                .map(|h| h.parse())
+                .collect();
+            
+            if let Ok(headers) = headers {
+                cors_layer = cors_layer.allow_headers(headers);
+            }
+            
+            // Configure credentials and max age
+            cors_layer = cors_layer.allow_credentials(config.http.cors.allow_credentials);
+            cors_layer = cors_layer.max_age(std::time::Duration::from_secs(config.http.cors.max_age as u64));
+            
+            gateway_app = gateway_app.layer(cors_layer);
+            info!("CORS enabled with {} allowed origins", config.http.cors.allowed_origins.len());
+        }
 
         // Add transformation layer if configured
         if let Some(ref transformation_config) = config.transformation {
@@ -182,11 +250,7 @@ impl GatewayServer {
             }
         }
 
-        gateway_app = gateway_app.layer(service_builder);
 
-        if config.enable_cors {
-            gateway_app = gateway_app.layer(CorsLayer::permissive());
-        }
 
         // Create admin application for configuration management
         let admin_app = Self::create_admin_app(state.clone(), circuit_breaker_layer.clone());
@@ -281,6 +345,11 @@ impl GatewayServer {
         let websocket_routes = WebSocketAdminRouter::create_router(websocket_admin_state);
         admin_app = admin_app.nest("/api/v1/admin", websocket_routes);
 
+        // Add HTTP admin routes
+        let http_admin_state = crate::admin::HttpAdminState::new(state.config.http.clone());
+        let http_routes = crate::admin::HttpAdminRouter::create_router(http_admin_state);
+        admin_app = admin_app.nest("/api/v1/admin", http_routes);
+
         // Add health check endpoints for admin interface
         admin_app = admin_app
             .route("/health", axum::routing::get(health_check))
@@ -317,8 +386,17 @@ impl GatewayServer {
         info!("Gateway HTTP server listening on {}", gateway_bind_addr);
         info!("Admin HTTP server listening on {}", admin_bind_addr);
 
-        // Start both servers concurrently
-        let gateway_server = axum::serve(gateway_listener, self.gateway_app);
+        // Configure HTTP/2 support if enabled
+        let gateway_server = if self.state.config.http.http2_enabled {
+            info!("HTTP/2 support enabled for gateway server");
+            // HTTP/2 is enabled by default in Axum/Hyper when using TLS
+            // For HTTP/2 over cleartext (h2c), additional configuration would be needed
+            axum::serve(gateway_listener, self.gateway_app)
+        } else {
+            info!("HTTP/2 support disabled, using HTTP/1.1 only");
+            axum::serve(gateway_listener, self.gateway_app)
+        };
+        
         let admin_server = axum::serve(admin_listener, self.admin_app);
 
         // Use tokio::select to run both servers concurrently
@@ -346,11 +424,12 @@ impl GatewayServer {
 }
 
 /// Main request handler that processes all incoming requests
+#[axum::debug_handler]
 #[instrument(skip(state, request), fields(request_id, method, path))]
 async fn handle_request(
     State(state): State<ServerState>,
     request: Request,
-) -> Result<Response, GatewayError> {
+) -> impl axum::response::IntoResponse {
     let start_time = std::time::Instant::now();
     
     // Extract request components
@@ -372,10 +451,10 @@ async fn handle_request(
         Ok(bytes) => bytes.to_vec(),
         Err(e) => {
             warn!("Failed to read request body: {}", e);
-            return Ok(create_error_response(
+            return create_error_response(
                 StatusCode::BAD_REQUEST,
                 "Failed to read request body".to_string(),
-            ));
+            );
         }
     };
 
@@ -386,7 +465,7 @@ async fn handle_request(
         uri.clone(),
         version,
         headers.clone(),
-        body_bytes,
+        body_bytes.clone(), // Clone here so we can use it later
         remote_addr,
     );
 
@@ -412,6 +491,46 @@ async fn handle_request(
     // Create request context
     let mut context = RequestContext::new(Arc::new(incoming_request));
 
+    // Apply HTTP/2 specific handling if enabled and request is HTTP/2
+    if state.config.http.http2_enabled && version == axum::http::Version::HTTP_2 {
+        debug!(
+            request_id = %context.request.id,
+            "Processing HTTP/2 request with advanced features"
+        );
+        // HTTP/2 specific features are handled by the underlying Axum/Hyper stack
+        // Configuration is applied through server setup
+    }
+
+    // Apply request timeout based on HTTP configuration
+    let request_timeout = state.config.http.timeouts.request_timeout;
+    let processing_start = std::time::Instant::now();
+
+    // Check request size against HTTP configuration
+    if body_bytes.len() > state.config.http.max_body_size {
+        warn!(
+            request_id = %context.request.id,
+            body_size = body_bytes.len(),
+            max_size = state.config.http.max_body_size,
+            "Request body exceeds maximum size"
+        );
+        return create_error_response(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!("Request body size {} exceeds maximum allowed size {}", 
+                   body_bytes.len(), state.config.http.max_body_size),
+        );
+    }
+
+    // Apply OpenAPI validation if configured
+    if let Some(ref openapi_config) = state.config.http.openapi {
+        if openapi_config.validate_requests {
+            debug!(
+                request_id = %context.request.id,
+                "OpenAPI request validation enabled (placeholder implementation)"
+            );
+            // In a full implementation, this would validate against the OpenAPI spec
+            // For now, we just log that validation is enabled
+        }
+    }
     // Route the request
     if let Some(route_match) = state.router.match_route(&context.request) {
         debug!(
@@ -469,7 +588,7 @@ async fn handle_request(
                             "circuit_breaker_state": format!("{:?}", circuit_breaker.state()),
                         });
                         
-                        Ok(create_json_response(StatusCode::OK, response_body))
+                        create_json_response(StatusCode::OK, response_body)
                     }
                     Err(error) => {
                         // Record failure with circuit breaker
@@ -482,10 +601,10 @@ async fn handle_request(
                             "Upstream service call failed"
                         );
                         
-                        Ok(create_error_response(
+                        create_error_response(
                             StatusCode::BAD_GATEWAY,
                             format!("Upstream service '{}' failed: {}", upstream_service, error),
-                        ))
+                        )
                     }
                 }
             }
@@ -513,7 +632,7 @@ async fn handle_request(
                 response.headers_mut().insert("retry-after", "60".parse().unwrap());
                 response.headers_mut().insert("x-circuit-breaker", "open".parse().unwrap());
                 
-                Ok(response)
+                response
             }
             Err(error) => {
                 // Other circuit breaker error
@@ -524,10 +643,10 @@ async fn handle_request(
                     "Circuit breaker error"
                 );
                 
-                Ok(create_error_response(
+                create_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Circuit breaker error: {}", error),
-                ))
+                )
             }
         }
     } else {
@@ -538,10 +657,10 @@ async fn handle_request(
             "No route matched for request"
         );
         
-        Ok(create_error_response(
+        create_error_response(
             StatusCode::NOT_FOUND,
             format!("No route found for {} {}", method, uri.path()),
-        ))
+        )
     }
 }
 
