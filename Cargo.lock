@@ -143,6 +143,7 @@ dependencies = [
  "testcontainers",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-stream",
  "tokio-test",
  "tokio-tungstenite 0.21.0",
  "tokio-util",
@@ -4101,6 +4102,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

@@ -10,6 +10,7 @@ license = "MIT"
 # Async runtime and core utilities
 tokio = { version = "1.35", features = ["full"] }
 tokio-util = { version = "0.7", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["full"] }
 
 # HTTP server framework and middleware
 axum = { version = "0.7", features = ["ws", "multipart", "macros"] }

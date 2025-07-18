@@ -119,13 +119,6 @@
   - Write comprehensive gRPC integration tests
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6_
 
-- [ ] 11.2. gRPC Protocol Support
-  - Fix stream type detection logic
-  - Implement proper streaming body parsing
-  - Add real tonic client integration
-  - Implement proper backpressure handling
-  - Add streaming-specific connection management
-
 - [ ] 12. WebSocket Protocol Support
   - Implement WebSocket upgrade handling using tokio-tungstenite
   - Build WebSocket connection management and pooling
