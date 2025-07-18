@@ -119,6 +119,59 @@
   - Write comprehensive gRPC integration tests
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6_
 
+- [ ] 11.2. Complete Real gRPC Client Integration and Fix Remaining Issues
+  - **Priority: High | Estimated Effort: 2-3 days**
+  - Replace simulated gRPC calls with real tonic client integration
+    - Remove simulate_unary_call() and other simulation methods from GrpcClient
+    - Implement actual tonic client calls using dynamic service discovery
+    - Add proper protobuf message serialization/deserializationIntegrate with generated gRPC client stubs or use reflection-based calls
+  - Enhance stream type detection logic
+    - Improve service definition lookup for accurate streaming type detection
+    - Add fallback mechanisms when service registry is unavailable
+    - Implement gRPC reflection client for runtime service discovery
+    - Add caching for service method metadata
+  - Improve streaming body parsing robustness
+    - Add comprehensive error handling for malformed gRPC frames
+    - Implement proper message length validation
+    - Add support for compressed message handling
+    - Handle partial frame scenarios and connection drops
+  - Enhance backpressure handling algorithms
+    - Implement adaptive backpressure based on downstream capacity
+    - Add queue depth monitoring and dynamic adjustment
+    - Implement circuit breaker integration for streaming calls
+    - Add metrics for backpressure events and stream health
+  - Strengthen streaming-specific connection management
+    - Add connection lifecycle events (connect, disconnect, error)
+    - Implement connection pooling per service with load balancing
+    - Add automatic connection recovery for failed streams
+    - Implement connection health checks specific to streaming
+  - Fix test compilation issues
+    - Make map_grpc_status_to_response method public for testing
+    - Remove unused imports in integration tests
+    - Add missing test utilities for real gRPC server mocking
+    - Update tests to work with real tonic client integration
+  - Add missing gRPC-Web features
+    - Implement proper gRPC-Web frame encoding/decoding
+    - Add support for gRPC-Web text format
+    - Implement proper CORS preflight handling
+    - Add gRPC-Web specific error handling
+  - Performance optimizations
+    - Implement zero-copy streaming where possible
+    - Add connection reuse for multiple calls to same service
+    - Optimize message parsing for high-throughput scenarios
+    - Add connection pooling metrics and tuning
+  - **Acceptance Criteria:**
+    - All gRPC calls use real tonic clients instead of simulations
+    - Integration tests pass with actual gRPC server backends
+    - Stream type detection works accurately in all scenarios
+    - Backpressure handling prevents memory exhaustion under load
+    - Connection management handles failures gracefully
+    - Performance benchmarks show acceptable latency and throughput
+    - All test compilation issues resolved
+  - **Dependencies:** Requires completion of service discovery integration (Task 4), may need protobuf schema management system, could benefit from gRPC reflection service setup
+  - **Testing Requirements:** Set up real gRPC test servers, add performance tests with high concurrent stream loads, test failure scenarios, validate memory usage under sustained streaming load
+  - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6_
+
 - [ ] 12. WebSocket Protocol Support
   - Implement WebSocket upgrade handling using tokio-tungstenite
   - Build WebSocket connection management and pooling
