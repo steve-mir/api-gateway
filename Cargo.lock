@@ -113,6 +113,7 @@ dependencies = [
  "dashmap",
  "flate2",
  "futures",
+ "futures-util",
  "hex",
  "humantime",
  "humantime-serde",

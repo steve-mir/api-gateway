@@ -111,5 +111,6 @@ wiremock = "0.5"
 tempfile = "3.8"
 axum-test = "14.0"
 futures = "0.3"
+futures-util = "0.3.31"
 
 
