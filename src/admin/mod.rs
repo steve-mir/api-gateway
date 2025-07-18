@@ -40,6 +40,7 @@ pub mod rate_limiting;
 pub mod circuit_breaker;
 pub mod transformation;
 pub mod grpc_management;
+pub mod websocket_management;
 
 pub use endpoints::{AdminRouter, AdminState};
 pub use audit::{ConfigAudit, ConfigChange, ConfigChangeType, AuditStatistics};
@@ -51,3 +52,4 @@ pub use rate_limiting::{RateLimitAdminRouter, RateLimitAdminState};
 pub use circuit_breaker::{CircuitBreakerAdminRouter, CircuitBreakerAdminState};
 pub use transformation::{TransformationAdminRouter, TransformationAdminState};
 pub use grpc_management::{GrpcAdminRouter, GrpcAdminState};
+pub use websocket_management::{WebSocketAdminRouter, WebSocketAdminState};

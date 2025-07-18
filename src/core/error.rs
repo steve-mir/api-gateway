@@ -153,6 +153,13 @@ impl GatewayError {
         }
     }
 
+    /// Create a not found error with a custom message
+    pub fn not_found<S: Into<String>>(message: S) -> Self {
+        Self::Internal {
+            message: format!("Not found: {}", message.into()),
+        }
+    }
+
     /// Get the appropriate HTTP status code for this error
     ///
     /// This method maps internal error types to HTTP status codes that should

@@ -15,10 +15,11 @@
 use crate::core::error::{GatewayError, GatewayResult};
 use crate::routing::router::Router;
 use crate::core::types::{IncomingRequest, RequestContext, Protocol};
-use crate::admin::{AdminRouter, AdminState};
+use crate::admin::{AdminRouter, AdminState, WebSocketAdminRouter, WebSocketAdminState};
 use crate::admin::config_manager::RuntimeConfigManager;
 use crate::admin::audit::ConfigAudit;
 use crate::admin::circuit_breaker::{CircuitBreakerAdminRouter, CircuitBreakerAdminState};
+use crate::protocols::websocket::{WebSocketHandler, WebSocketConfig};
 
 use crate::observability::health::{HealthChecker, HealthCheckConfig};
 use crate::middleware::circuit_breaker::{CircuitBreakerLayer, CircuitBreakerMiddlewareConfig};
@@ -26,10 +27,10 @@ use crate::middleware::transformation::TransformationLayer;
 use crate::core::config::TransformationConfig;
 use axum::{
     body::Body,
-    extract::{Request, State},
+    extract::{Request, State, Query, WebSocketUpgrade, ConnectInfo},
     http::{StatusCode},
     response::{IntoResponse, Response},
-    routing::any,
+    routing::{any, get},
     Router as AxumRouter,
 };
 use std::net::SocketAddr;
@@ -69,6 +70,9 @@ pub struct ServerConfig {
     
     /// Request/response transformation configuration
     pub transformation: Option<TransformationConfig>,
+    
+    /// WebSocket configuration
+    pub websocket: WebSocketConfig,
 }
 
 impl Default for ServerConfig {
@@ -82,6 +86,7 @@ impl Default for ServerConfig {
             enable_cors: true,
             circuit_breaker: CircuitBreakerMiddlewareConfig::default(),
             transformation: None,
+            websocket: WebSocketConfig::default(),
         }
     }
 }
@@ -97,15 +102,22 @@ pub struct ServerState {
     
     /// Circuit breaker layer for upstream service protection
     pub circuit_breaker_layer: CircuitBreakerLayer,
+    
+    /// WebSocket handler
+    pub websocket_handler: Arc<WebSocketHandler>,
 }
 
 impl ServerState {
     /// Create new server state
     pub fn new(router: Router, config: ServerConfig, circuit_breaker_layer: CircuitBreakerLayer) -> Self {
+        // Create WebSocket handler with configuration
+        let websocket_handler = Arc::new(WebSocketHandler::new(config.websocket.clone()));
+        
         Self {
             router: Arc::new(router),
             config,
             circuit_breaker_layer,
+            websocket_handler,
         }
     }
 }
@@ -145,6 +157,7 @@ impl GatewayServer {
         
         // Build the gateway application for handling API requests
         let mut gateway_app = AxumRouter::new()
+            .route("/ws", get(websocket_upgrade_handler))
             .route("/*path", any(handle_request))
             .route("/health", axum::routing::get(gateway_health_check))
             .route("/ready", axum::routing::get(gateway_readiness_check))
@@ -229,7 +242,7 @@ impl GatewayServer {
     }
 
     /// Create the admin application with configuration management endpoints
-    fn create_admin_app(_state: ServerState, circuit_breaker_layer: CircuitBreakerLayer) -> AxumRouter {
+    fn create_admin_app(state: ServerState, circuit_breaker_layer: CircuitBreakerLayer) -> AxumRouter {
         // Create audit trail for configuration changes
         let audit = Arc::new(ConfigAudit::new(Some("audit.log".into())));
         
@@ -252,12 +265,21 @@ impl GatewayServer {
             circuit_breaker_layer
         );
 
+        // Create WebSocket admin state
+        let websocket_admin_state = WebSocketAdminState::new(
+            state.websocket_handler.connection_manager()
+        );
+
         // Create admin router with all endpoints
         let mut admin_app = AdminRouter::create_router(admin_state);
 
         // Add circuit breaker admin routes
         let circuit_breaker_routes = CircuitBreakerAdminRouter::create_router(circuit_breaker_admin_state);
         admin_app = admin_app.nest("/api/v1/admin", circuit_breaker_routes);
+
+        // Add WebSocket admin routes
+        let websocket_routes = WebSocketAdminRouter::create_router(websocket_admin_state);
+        admin_app = admin_app.nest("/api/v1/admin", websocket_routes);
 
         // Add health check endpoints for admin interface
         admin_app = admin_app
@@ -672,6 +694,23 @@ pub async fn gateway_readiness_check() -> impl IntoResponse {
     });
 
     (StatusCode::OK, axum::Json(readiness_info))
+}
+
+/// WebSocket upgrade handler
+#[instrument(skip(state, ws))]
+pub async fn websocket_upgrade_handler(
+    State(state): State<ServerState>,
+    ws: WebSocketUpgrade,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
+    query: Option<Query<crate::protocols::websocket::WebSocketUpgradeQuery>>,
+) -> Result<Response, GatewayError> {
+    info!(
+        remote_addr = %remote_addr,
+        "WebSocket upgrade request received"
+    );
+
+    // Handle the WebSocket upgrade through the WebSocket handler
+    state.websocket_handler.handle_upgrade(ws, remote_addr, query).await
 }
 
 #[cfg(test)]
