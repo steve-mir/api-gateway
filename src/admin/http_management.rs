@@ -14,10 +14,9 @@ use crate::protocols::http::{
     CompressionAlgorithm
 };
 use axum::{
-    extract::{Path, Query, State},
-    http::StatusCode,
+    extract::{Query, State},
     response::Json,
-    routing::{get, post, put, delete},
+    routing::{get, post, put},
     Router,
 };
 use serde::{Deserialize, Serialize};
@@ -25,7 +24,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::{info, warn, debug};
+use tracing::{info, debug};
 
 /// HTTP management admin state
 #[derive(Clone)]

@@ -59,8 +59,8 @@ pub use deduplication::{DeduplicationManager, IdempotencyManager, RequestDedupli
 pub use admin::{CacheAdminRouter, CacheAdminState};
 pub use middleware::{CacheMiddleware, CachePolicy};
 
-use crate::core::error::{GatewayError, GatewayResult};
-use std::time::Duration;
+use crate::core::error::GatewayError;
+// use std::time::Duration;
 
 /// Cache operation result
 pub type CacheResult<T> = Result<T, CacheError>;

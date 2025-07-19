@@ -3,7 +3,7 @@
 //! This module provides mechanisms for cache invalidation including
 //! pattern-based invalidation, event-driven invalidation, and manual invalidation.
 
-use super::{CacheManager, CacheError, CacheResult};
+use super::{CacheManager, CacheResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

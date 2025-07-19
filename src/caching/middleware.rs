@@ -5,7 +5,7 @@
 
 use super::{
     CacheManager, KeyGenerator, DefaultKeyGenerator,
-    KeyGenerationStrategy, CacheResult, CacheError,
+    KeyGenerationStrategy,
 };
 use super::deduplication::{DeduplicationManager, IdempotencyManager, DeduplicationConfig, IdempotencyConfig};
 use crate::core::types::{IncomingRequest, RequestContext, GatewayResponse};
@@ -14,7 +14,7 @@ use axum::http::{HeaderMap, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::debug;
 
 /// Cache policy configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

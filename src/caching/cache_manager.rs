@@ -536,7 +536,7 @@ impl CacheManager {
     }
 
     /// Update cache statistics for get operations
-    async fn update_stats(&self, hit: bool, duration: Duration) {
+    async fn update_stats(&self, hit: bool, _duration: Duration) {
         let mut stats = self.stats.write().await;
         stats.operations += 1;
         

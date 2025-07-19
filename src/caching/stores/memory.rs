@@ -12,8 +12,8 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use tokio::time::{interval, Interval};
-use tracing::{debug, info, warn};
+use tokio::time::interval;
+use tracing::{debug, info};
 
 /// In-memory cache configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

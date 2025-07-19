@@ -15,14 +15,14 @@
 //! - Hyper for low-level HTTP handling
 
 use crate::core::error::{GatewayError, GatewayResult};
-use crate::core::types::{IncomingRequest, RequestContext, Protocol};
+use crate::core::types::RequestContext;
 use axum::{
     body::Body,
     extract::Request,
-    http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Version},
-    response::{IntoResponse, Response},
+    http::{HeaderName, HeaderValue, Method, StatusCode, Version},
+    response::Response,
 };
-use hyper::body::Bytes;
+// use hyper::body::Bytes;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

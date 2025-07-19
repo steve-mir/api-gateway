@@ -3,10 +3,10 @@
 //! This module provides admin endpoints for cache management and monitoring.
 
 use super::{CacheManager, InvalidationManager, CacheStats, InvalidationEvent};
-use crate::core::error::{GatewayError, GatewayResult};
+use crate::core::error::GatewayError;
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    // http::StatusCode,
     response::Json,
     routing::{delete, get, post},
     Router,
@@ -121,7 +121,7 @@ pub struct CacheQueryParams {
 /// Get cache statistics
 pub async fn get_cache_stats(
     State(state): State<CacheAdminState>,
-    Query(params): Query<CacheQueryParams>,
+    Query(_params): Query<CacheQueryParams>,
 ) -> Result<Json<CacheStatsResponse>, GatewayError> {
     let stats = state.cache_manager.stats().await;
     let health = state.cache_manager.health_check().await
@@ -215,7 +215,7 @@ pub async fn clear_cache(
 pub async fn get_cache_key(
     State(state): State<CacheAdminState>,
     Path(key): Path<String>,
-    Query(params): Query<CacheQueryParams>,
+    Query(_params): Query<CacheQueryParams>,
 ) -> Result<Json<CacheKeyResponse>, GatewayError> {
     let exists = state.cache_manager.exists(&key).await
         .unwrap_or(false);
@@ -228,7 +228,10 @@ pub async fn get_cache_key(
                     Ok(s) => Some(s),
                     Err(_) => {
                         // If not valid UTF-8, return base64 encoded
-                        Some(base64::encode(data))
+                        Some({
+                            use base64::Engine;
+                            base64::engine::general_purpose::STANDARD.encode(data)
+                        })
                     }
                 }
             }

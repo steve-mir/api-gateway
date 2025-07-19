@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, info, warn};
-use uuid::Uuid;
+use tokio::sync::RwLock;
+use tracing::{debug, warn};
+// use uuid::Uuid;
 
 /// Deduplication configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

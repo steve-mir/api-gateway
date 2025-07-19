@@ -9,7 +9,7 @@ pub mod redis_store;
 pub use memory::{InMemoryCache, InMemoryCacheConfig};
 pub use redis_store::{RedisCache, RedisCacheConfig};
 
-use super::{CacheError, CacheResult};
+use super::CacheResult;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

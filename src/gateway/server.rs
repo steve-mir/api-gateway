@@ -672,8 +672,8 @@ async fn handle_request(
     }
 
     // Apply request timeout based on HTTP configuration
-    let request_timeout = state.config.http.timeouts.request_timeout;
-    let processing_start = std::time::Instant::now();
+    let _request_timeout = state.config.http.timeouts.request_timeout;
+    let _processing_start = std::time::Instant::now();
 
     // Check request size against HTTP configuration
     if body_bytes.len() > state.config.http.max_body_size {
