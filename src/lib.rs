@@ -13,6 +13,7 @@ pub mod load_balancing;
 pub mod discovery;
 pub mod routing;
 pub mod observability;
+pub mod caching;
 pub mod admin;
 
 // Re-export commonly used types

@@ -55,3 +55,6 @@ pub use transformation::{TransformationAdminRouter, TransformationAdminState};
 pub use grpc_management::{GrpcAdminRouter, GrpcAdminState};
 pub use websocket_management::{WebSocketAdminRouter, WebSocketAdminState};
 pub use http_management::{HttpAdminRouter, HttpAdminState};
+
+// Re-export cache admin from caching module
+pub use crate::caching::admin::{CacheAdminRouter, CacheAdminState};
