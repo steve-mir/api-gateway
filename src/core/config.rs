@@ -46,6 +46,9 @@ pub struct GatewayConfig {
     
     /// Service discovery configuration
     pub service_discovery: ServiceDiscoveryConfig,
+    
+    /// Caching configuration
+    pub cache: Option<CacheConfig>,
 }
 
 impl GatewayConfig {
@@ -155,6 +158,48 @@ impl GatewayConfig {
         if let Ok(rate) = env::var("GATEWAY_TRACING_SAMPLING_RATE") {
             self.observability.tracing.sampling_rate = rate.parse()
                 .map_err(|e| GatewayError::config(format!("Invalid GATEWAY_TRACING_SAMPLING_RATE: {}", e)))?;
+        }
+
+        // Cache configuration overrides
+        if let Ok(enabled) = env::var("GATEWAY_CACHE_ENABLED") {
+            if let Some(ref mut cache) = self.cache {
+                cache.enabled = enabled.parse()
+                    .map_err(|e| GatewayError::config(format!("Invalid GATEWAY_CACHE_ENABLED: {}", e)))?;
+            }
+        }
+
+        if let Ok(enabled) = env::var("GATEWAY_CACHE_IN_MEMORY_ENABLED") {
+            if let Some(ref mut cache) = self.cache {
+                cache.in_memory.enabled = enabled.parse()
+                    .map_err(|e| GatewayError::config(format!("Invalid GATEWAY_CACHE_IN_MEMORY_ENABLED: {}", e)))?;
+            }
+        }
+
+        if let Ok(max_entries) = env::var("GATEWAY_CACHE_IN_MEMORY_MAX_ENTRIES") {
+            if let Some(ref mut cache) = self.cache {
+                cache.in_memory.max_entries = max_entries.parse()
+                    .map_err(|e| GatewayError::config(format!("Invalid GATEWAY_CACHE_IN_MEMORY_MAX_ENTRIES: {}", e)))?;
+            }
+        }
+
+        if let Ok(enabled) = env::var("GATEWAY_CACHE_REDIS_ENABLED") {
+            if let Some(ref mut cache) = self.cache {
+                cache.redis.enabled = enabled.parse()
+                    .map_err(|e| GatewayError::config(format!("Invalid GATEWAY_CACHE_REDIS_ENABLED: {}", e)))?;
+            }
+        }
+
+        if let Ok(url) = env::var("GATEWAY_CACHE_REDIS_URL") {
+            if let Some(ref mut cache) = self.cache {
+                cache.redis.url = url;
+            }
+        }
+
+        if let Ok(ttl) = env::var("GATEWAY_CACHE_DEFAULT_TTL") {
+            if let Some(ref mut cache) = self.cache {
+                cache.default_ttl = humantime::parse_duration(&ttl)
+                    .map_err(|e| GatewayError::config(format!("Invalid GATEWAY_CACHE_DEFAULT_TTL: {}", e)))?;
+            }
         }
 
         Ok(())
@@ -305,6 +350,52 @@ impl GatewayConfig {
 
         if self.observability.tracing.sampling_rate < 0.0 || self.observability.tracing.sampling_rate > 1.0 {
             errors.push(format!("Tracing sampling_rate must be between 0.0 and 1.0, got: {}", self.observability.tracing.sampling_rate));
+        }
+
+        // Validate cache configuration if present
+        if let Some(ref cache) = self.cache {
+            if cache.enabled {
+                if !cache.in_memory.enabled && !cache.redis.enabled {
+                    errors.push("At least one cache store (in_memory or redis) must be enabled when caching is enabled".to_string());
+                }
+
+                if cache.in_memory.enabled {
+                    if cache.in_memory.max_entries == 0 {
+                        errors.push("In-memory cache max_entries must be greater than 0".to_string());
+                    }
+                    if cache.in_memory.max_memory_mb == 0 {
+                        errors.push("In-memory cache max_memory_mb must be greater than 0".to_string());
+                    }
+                }
+
+                if cache.redis.enabled {
+                    if cache.redis.url.is_empty() {
+                        errors.push("Redis cache URL cannot be empty".to_string());
+                    }
+                    if cache.redis.pool_size == 0 {
+                        errors.push("Redis cache pool_size must be greater than 0".to_string());
+                    }
+                }
+
+                if cache.default_ttl.as_secs() == 0 {
+                    errors.push("Cache default_ttl must be greater than 0".to_string());
+                }
+
+                // Validate cache policies
+                for (route, policy) in &cache.policies {
+                    if policy.enabled {
+                        if policy.ttl.as_secs() == 0 {
+                            errors.push(format!("Cache policy for route '{}' has TTL of 0", route));
+                        }
+                        if policy.cacheable_methods.is_empty() {
+                            errors.push(format!("Cache policy for route '{}' has no cacheable methods", route));
+                        }
+                        if policy.max_response_size == 0 {
+                            errors.push(format!("Cache policy for route '{}' has max_response_size of 0", route));
+                        }
+                    }
+                }
+            }
         }
 
         // Return all validation errors
@@ -837,6 +928,169 @@ pub struct ConsulConfig {
     pub token: Option<String>,
 }
 
+/// Cache configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheConfig {
+    /// Enable caching system
+    pub enabled: bool,
+    
+    /// In-memory cache configuration
+    pub in_memory: InMemoryCacheConfig,
+    
+    /// Redis cache configuration
+    pub redis: RedisCacheConfig,
+    
+    /// Default TTL for cached items
+    #[serde(with = "humantime_serde")]
+    pub default_ttl: Duration,
+    
+    /// Cache policies for different routes
+    pub policies: HashMap<String, CachePolicyConfig>,
+    
+    /// Global cache policy (applied to all routes unless overridden)
+    pub global_policy: CachePolicyConfig,
+}
+
+/// In-memory cache configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InMemoryCacheConfig {
+    /// Enable in-memory caching
+    pub enabled: bool,
+    
+    /// Maximum number of entries
+    pub max_entries: usize,
+    
+    /// Maximum memory usage in MB
+    pub max_memory_mb: usize,
+    
+    /// Cleanup interval for expired entries
+    #[serde(with = "humantime_serde")]
+    pub cleanup_interval: Duration,
+}
+
+/// Redis cache configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedisCacheConfig {
+    /// Enable Redis caching
+    pub enabled: bool,
+    
+    /// Redis connection URL
+    pub url: String,
+    
+    /// Connection pool size
+    pub pool_size: u32,
+    
+    /// Connection timeout
+    #[serde(with = "humantime_serde")]
+    pub connection_timeout: Duration,
+    
+    /// Key prefix for all cache entries
+    pub key_prefix: String,
+    
+    /// Enable Redis cluster mode
+    pub cluster_mode: bool,
+}
+
+/// Cache policy configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachePolicyConfig {
+    /// Enable caching for this policy
+    pub enabled: bool,
+    
+    /// Cache TTL
+    #[serde(with = "humantime_serde")]
+    pub ttl: Duration,
+    
+    /// HTTP methods to cache
+    pub cacheable_methods: Vec<String>,
+    
+    /// HTTP status codes to cache
+    pub cacheable_status_codes: Vec<u16>,
+    
+    /// Headers to include in cache key
+    pub vary_headers: Vec<String>,
+    
+    /// Whether to cache responses with authentication
+    pub cache_authenticated: bool,
+    
+    /// Maximum response size to cache (in bytes)
+    pub max_response_size: usize,
+    
+    /// Key generation strategy
+    pub key_strategy: CacheKeyStrategy,
+    
+    /// Enable request deduplication
+    pub enable_deduplication: bool,
+    
+    /// Enable idempotency
+    pub enable_idempotency: bool,
+}
+
+/// Cache key generation strategies
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum CacheKeyStrategy {
+    /// Simple path-based key generation
+    Simple,
+    
+    /// Include query parameters in key
+    WithQuery,
+    
+    /// Include specific headers in key
+    WithHeaders { headers: Vec<String> },
+    
+    /// Include user context in key
+    WithUser,
+    
+    /// Custom key generation with template
+    Custom { template: String },
+    
+    /// Hash-based key generation for consistent short keys
+    Hashed { include_body: bool },
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            in_memory: InMemoryCacheConfig {
+                enabled: true,
+                max_entries: 10000,
+                max_memory_mb: 100,
+                cleanup_interval: Duration::from_secs(60),
+            },
+            redis: RedisCacheConfig {
+                enabled: false,
+                url: "redis://localhost:6379".to_string(),
+                pool_size: 10,
+                connection_timeout: Duration::from_secs(5),
+                key_prefix: "gateway:cache:".to_string(),
+                cluster_mode: false,
+            },
+            default_ttl: Duration::from_secs(300), // 5 minutes
+            policies: HashMap::new(),
+            global_policy: CachePolicyConfig::default(),
+        }
+    }
+}
+
+impl Default for CachePolicyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ttl: Duration::from_secs(300), // 5 minutes
+            cacheable_methods: vec!["GET".to_string(), "HEAD".to_string()],
+            cacheable_status_codes: vec![200, 203, 204, 206, 300, 301, 404, 405, 410, 414, 501],
+            vary_headers: vec!["Accept".to_string(), "Accept-Encoding".to_string()],
+            cache_authenticated: false,
+            max_response_size: 1024 * 1024, // 1MB
+            key_strategy: CacheKeyStrategy::WithQuery,
+            enable_deduplication: true,
+            enable_idempotency: false,
+        }
+    }
+}
+
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
@@ -876,6 +1130,7 @@ impl Default for GatewayConfig {
                 kubernetes: None,
                 consul: None,
             },
+            cache: None,
         }
     }
 }

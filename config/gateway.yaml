@@ -141,3 +141,44 @@ service_discovery:
   kubernetes:
     default_namespace: "default"
     watch_all_namespaces: false
+
+cache:
+  enabled: true
+  in_memory:
+    enabled: true
+    max_entries: 10000
+    max_memory_mb: 100
+    cleanup_interval: "60s"
+  redis:
+    enabled: false
+    url: "redis://localhost:6379"
+    pool_size: 10
+    connection_timeout: "5s"
+    key_prefix: "gateway:cache:"
+    cluster_mode: false
+  default_ttl: "5m"
+  global_policy:
+    enabled: true
+    ttl: "5m"
+    cacheable_methods: ["GET", "HEAD"]
+    cacheable_status_codes: [200, 203, 204, 206, 300, 301, 404, 405, 410, 414, 501]
+    vary_headers: ["Accept", "Accept-Encoding"]
+    cache_authenticated: false
+    max_response_size: 1048576  # 1MB
+    key_strategy:
+      type: "WithQuery"
+    enable_deduplication: true
+    enable_idempotency: false
+  policies:
+    "/api/v1/users":
+      enabled: true
+      ttl: "10m"
+      cacheable_methods: ["GET"]
+      cacheable_status_codes: [200]
+      vary_headers: ["Accept", "Authorization"]
+      cache_authenticated: true
+      max_response_size: 2097152  # 2MB
+      key_strategy:
+        type: "WithUser"
+      enable_deduplication: true
+      enable_idempotency: false

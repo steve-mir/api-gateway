@@ -15,12 +15,14 @@
 use crate::core::error::{GatewayError, GatewayResult};
 use crate::routing::router::Router;
 use crate::core::types::{IncomingRequest, RequestContext, Protocol};
-use crate::admin::{AdminRouter, AdminState, WebSocketAdminRouter, WebSocketAdminState};
+use crate::admin::{AdminRouter, AdminState, WebSocketAdminRouter, WebSocketAdminState, CacheAdminRouter, CacheAdminState};
 use crate::admin::config_manager::RuntimeConfigManager;
 use crate::admin::audit::ConfigAudit;
 use crate::admin::circuit_breaker::{CircuitBreakerAdminRouter, CircuitBreakerAdminState};
 use crate::protocols::websocket::{WebSocketHandler, WebSocketConfig};
 use crate::protocols::http::{HttpHandler, HttpConfig};
+use crate::caching::{CacheManager, CacheMiddleware, InvalidationManager, InvalidationStrategy};
+use crate::core::config::{CacheConfig, CachePolicyConfig, CacheKeyStrategy};
 
 use crate::observability::health::{HealthChecker, HealthCheckConfig};
 use crate::middleware::circuit_breaker::{CircuitBreakerLayer, CircuitBreakerMiddlewareConfig};
@@ -44,6 +46,64 @@ use tower_http::{
     compression::CompressionLayer,
 };
 use tracing::{info, warn, debug, instrument};
+
+/// Convert gateway cache config to cache manager config
+fn convert_cache_config(config: &CacheConfig) -> GatewayResult<crate::caching::CacheConfig> {
+    Ok(crate::caching::CacheConfig {
+        in_memory_enabled: config.in_memory.enabled,
+        in_memory: crate::caching::cache_manager::InMemoryCacheConfig {
+            max_entries: config.in_memory.max_entries,
+            max_memory_bytes: config.in_memory.max_memory_mb * 1024 * 1024, // Convert MB to bytes
+            cleanup_interval: config.in_memory.cleanup_interval,
+        },
+        redis_enabled: config.redis.enabled,
+        redis: crate::caching::cache_manager::RedisCacheConfig {
+            url: config.redis.url.clone(),
+            pool_size: config.redis.pool_size,
+            connection_timeout: config.redis.connection_timeout,
+            key_prefix: config.redis.key_prefix.clone(),
+            cluster_mode: config.redis.cluster_mode,
+        },
+        default_ttl: config.default_ttl,
+        max_key_length: 250,
+        operation_timeout: std::time::Duration::from_secs(1),
+        enable_stats: true,
+    })
+}
+
+/// Convert gateway cache policy to cache middleware policy
+fn convert_cache_policy(config: &CachePolicyConfig) -> crate::caching::CachePolicy {
+    crate::caching::CachePolicy {
+        enabled: config.enabled,
+        ttl: config.ttl,
+        cacheable_methods: config.cacheable_methods.clone(),
+        cacheable_status_codes: config.cacheable_status_codes.clone(),
+        vary_headers: config.vary_headers.clone(),
+        cache_authenticated: config.cache_authenticated,
+        max_response_size: config.max_response_size,
+        key_strategy: convert_key_strategy(&config.key_strategy),
+        enable_deduplication: config.enable_deduplication,
+        enable_idempotency: config.enable_idempotency,
+    }
+}
+
+/// Convert gateway cache key strategy to caching key strategy
+fn convert_key_strategy(strategy: &CacheKeyStrategy) -> crate::caching::KeyGenerationStrategy {
+    match strategy {
+        CacheKeyStrategy::Simple => crate::caching::KeyGenerationStrategy::Simple,
+        CacheKeyStrategy::WithQuery => crate::caching::KeyGenerationStrategy::WithQuery,
+        CacheKeyStrategy::WithHeaders { headers } => crate::caching::KeyGenerationStrategy::WithHeaders { 
+            headers: headers.clone() 
+        },
+        CacheKeyStrategy::WithUser => crate::caching::KeyGenerationStrategy::WithUser,
+        CacheKeyStrategy::Custom { template } => crate::caching::KeyGenerationStrategy::Custom { 
+            template: template.clone() 
+        },
+        CacheKeyStrategy::Hashed { include_body } => crate::caching::KeyGenerationStrategy::Hashed { 
+            include_body: *include_body 
+        },
+    }
+}
 
 /// HTTP Server configuration
 #[derive(Debug, Clone)]
@@ -113,6 +173,15 @@ pub struct ServerState {
     
     /// HTTP protocol handler
     pub http_handler: Arc<HttpHandler>,
+    
+    /// Cache manager (optional)
+    pub cache_manager: Option<Arc<CacheManager>>,
+    
+    /// Cache middleware (optional)
+    pub cache_middleware: Option<Arc<CacheMiddleware>>,
+    
+    /// Cache invalidation manager (optional)
+    pub invalidation_manager: Option<Arc<InvalidationManager>>,
 }
 
 impl ServerState {
@@ -133,7 +202,72 @@ impl ServerState {
             circuit_breaker_layer,
             websocket_handler,
             http_handler,
+            cache_manager: None,
+            cache_middleware: None,
+            invalidation_manager: None,
         }
+    }
+
+    /// Create new server state with cache configuration
+    pub async fn new_with_cache(
+        router: Router, 
+        config: ServerConfig, 
+        circuit_breaker_layer: CircuitBreakerLayer,
+        cache_config: Option<CacheConfig>
+    ) -> GatewayResult<Self> {
+        // Create WebSocket handler with configuration
+        let websocket_handler = Arc::new(WebSocketHandler::new(config.websocket.clone()));
+        
+        // Create HTTP handler with configuration
+        let http_handler = Arc::new(
+            HttpHandler::new(config.http.clone())
+                .expect("Failed to create HTTP handler")
+        );
+
+        // Initialize cache components if cache is enabled
+        let (cache_manager, cache_middleware, invalidation_manager) = if let Some(cache_cfg) = cache_config {
+            if cache_cfg.enabled {
+                // Convert config types
+                let cache_manager_config = convert_cache_config(&cache_cfg)?;
+                
+                // Create cache manager
+                let cache_manager = Arc::new(CacheManager::new(cache_manager_config).await
+                    .map_err(|e| GatewayError::internal(format!("Failed to create cache manager: {}", e)))?);
+                
+                // Create invalidation manager
+                let invalidation_manager = Arc::new(InvalidationManager::new(
+                    cache_manager.clone(),
+                    InvalidationStrategy::Immediate,
+                ));
+                
+                // Create cache middleware with global policy
+                let cache_policy = convert_cache_policy(&cache_cfg.global_policy);
+                let cache_middleware = Arc::new(CacheMiddleware::new(
+                    cache_manager.clone(),
+                    cache_policy,
+                ));
+                
+                info!("Cache system initialized successfully");
+                (Some(cache_manager), Some(cache_middleware), Some(invalidation_manager))
+            } else {
+                info!("Cache system disabled in configuration");
+                (None, None, None)
+            }
+        } else {
+            info!("No cache configuration provided");
+            (None, None, None)
+        };
+        
+        Ok(Self {
+            router: Arc::new(router),
+            config,
+            circuit_breaker_layer,
+            websocket_handler,
+            http_handler,
+            cache_manager,
+            cache_middleware,
+            invalidation_manager,
+        })
     }
 }
 
@@ -164,6 +298,31 @@ impl GatewayServer {
         // Create server state with circuit breaker layer
         let state = ServerState::new(router, config.clone(), circuit_breaker_layer.clone());
         
+        Self::build_server(state, config, circuit_breaker_layer)
+    }
+
+    /// Create a new HTTP server with caching support
+    pub async fn new_with_cache(
+        router: Router, 
+        config: ServerConfig, 
+        cache_config: Option<CacheConfig>
+    ) -> GatewayResult<Self> {
+        // Create circuit breaker layer first
+        let circuit_breaker_layer = CircuitBreakerLayer::new(config.circuit_breaker.clone());
+        
+        // Create server state with cache configuration
+        let state = ServerState::new_with_cache(
+            router, 
+            config.clone(), 
+            circuit_breaker_layer.clone(),
+            cache_config
+        ).await?;
+        
+        Ok(Self::build_server(state, config, circuit_breaker_layer))
+    }
+
+    /// Build the server with the given state and configuration
+    fn build_server(state: ServerState, config: ServerConfig, circuit_breaker_layer: CircuitBreakerLayer) -> Self {
         // Create health checker
         let health_checker = Arc::new(HealthChecker::new(None));
         
@@ -350,6 +509,17 @@ impl GatewayServer {
         let http_routes = crate::admin::HttpAdminRouter::create_router(http_admin_state);
         admin_app = admin_app.nest("/api/v1/admin", http_routes);
 
+        // Add cache admin routes if cache is enabled
+        if let (Some(cache_manager), Some(invalidation_manager)) = (&state.cache_manager, &state.invalidation_manager) {
+            let cache_admin_state = CacheAdminState {
+                cache_manager: cache_manager.clone(),
+                invalidation_manager: invalidation_manager.clone(),
+            };
+            let cache_routes = CacheAdminRouter::create_router(cache_admin_state);
+            admin_app = admin_app.nest("/api/v1/admin", cache_routes);
+            info!("Cache admin routes added to admin server");
+        }
+
         // Add health check endpoints for admin interface
         admin_app = admin_app
             .route("/health", axum::routing::get(health_check))
@@ -531,6 +701,33 @@ async fn handle_request(
             // For now, we just log that validation is enabled
         }
     }
+
+    // Check cache for cached response if caching is enabled
+    if let Some(ref cache_middleware) = state.cache_middleware {
+        match cache_middleware.process_request(&context.request, &context).await {
+            Ok(Some(cached_response)) => {
+                debug!(
+                    request_id = %context.request.id,
+                    "Returning cached response"
+                );
+                return convert_gateway_response_to_axum(cached_response);
+            }
+            Ok(None) => {
+                debug!(
+                    request_id = %context.request.id,
+                    "No cached response found, proceeding with upstream call"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    request_id = %context.request.id,
+                    error = %e,
+                    "Cache middleware error, proceeding without cache"
+                );
+            }
+        }
+    }
+
     // Route the request
     if let Some(route_match) = state.router.match_route(&context.request) {
         debug!(
@@ -588,7 +785,25 @@ async fn handle_request(
                             "circuit_breaker_state": format!("{:?}", circuit_breaker.state()),
                         });
                         
-                        create_json_response(StatusCode::OK, response_body)
+                        let mut response = create_gateway_response(StatusCode::OK, response_body);
+                        
+                        // Process response through cache middleware if enabled
+                        if let Some(ref cache_middleware) = state.cache_middleware {
+                            if let Err(e) = cache_middleware.process_response(&context.request, &context, &mut response).await {
+                                warn!(
+                                    request_id = %context.request.id,
+                                    error = %e,
+                                    "Failed to cache response"
+                                );
+                            } else {
+                                debug!(
+                                    request_id = %context.request.id,
+                                    "Response cached successfully"
+                                );
+                            }
+                        }
+                        
+                        convert_gateway_response_to_axum(response)
                     }
                     Err(error) => {
                         // Record failure with circuit breaker
@@ -688,6 +903,35 @@ fn create_error_response(status: StatusCode, message: String) -> Response {
     });
 
     create_json_response(status, error_body)
+}
+
+/// Create a GatewayResponse for cache processing
+fn create_gateway_response(status: StatusCode, body: serde_json::Value) -> crate::core::types::GatewayResponse {
+    let body_bytes = serde_json::to_vec(&body).unwrap_or_else(|_| {
+        b"Internal server error".to_vec()
+    });
+
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("content-type", "application/json".parse().unwrap());
+    headers.insert("content-length", body_bytes.len().to_string().parse().unwrap());
+
+    crate::core::types::GatewayResponse::new(status, headers, body_bytes)
+}
+
+/// Convert GatewayResponse to Axum Response
+fn convert_gateway_response_to_axum(gateway_response: crate::core::types::GatewayResponse) -> Response {
+    let mut response = Response::builder()
+        .status(gateway_response.status);
+    
+    // Add headers
+    for (name, value) in gateway_response.headers.iter() {
+        response = response.header(name, value);
+    }
+    
+    response
+        .body(Body::from(gateway_response.body.as_ref().clone()))
+        .unwrap()
+        .into_response()
 }
 
 /// Simulate upstream service call

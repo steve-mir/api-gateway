@@ -79,8 +79,15 @@ async fn main() -> GatewayResult<()> {
         ..Default::default()
     };
     
-    // Create and start HTTP server
-    let server = GatewayServer::new(router, server_config);
+    // Create and start HTTP server with cache support
+    let server = if config.cache.is_some() {
+        info!("Creating server with cache support");
+        GatewayServer::new_with_cache(router, server_config, config.cache).await?
+    } else {
+        info!("Creating server without cache support");
+        GatewayServer::new(router, server_config)
+    };
+    
     let gateway_addr = server.bind_addr();
     let admin_addr = server.admin_bind_addr();
     
