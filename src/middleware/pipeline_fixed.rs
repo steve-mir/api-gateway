@@ -13,6 +13,7 @@ use tracing::{debug, error, info, instrument};
 
 use crate::core::error::{GatewayError, GatewayResult};
 use crate::core::types::{GatewayResponse, IncomingRequest, RequestContext};
+use crate::middleware::factory::MiddlewareFactory;
 
 /// Core middleware trait that all middleware must implement
 #[async_trait]
@@ -174,18 +175,26 @@ pub struct MiddlewarePipeline {
     
     /// Execution metrics
     metrics: Arc<PipelineMetrics>,
+    
+    /// Middleware factory for creating instances
+    factory: Arc<MiddlewareFactory>,
 }
 
 impl MiddlewarePipeline {
     /// Create a new middleware pipeline
     pub async fn new(config: MiddlewarePipelineConfig) -> GatewayResult<Self> {
         let metrics = Arc::new(PipelineMetrics::new());
+        let factory = Arc::new(MiddlewareFactory::new_with_builtin().await);
         
         let pipeline = Self {
             middleware: Arc::new(RwLock::new(Vec::new())),
-            config: Arc::new(RwLock::new(config)),
+            config: Arc::new(RwLock::new(config.clone())),
             metrics,
+            factory,
         };
+        
+        // Initialize middleware from configuration
+        pipeline.reload_middleware().await?;
         
         Ok(pipeline)
     }
@@ -414,11 +423,44 @@ impl MiddlewarePipeline {
 
     /// Reload middleware from configuration
     pub async fn reload_middleware(&self) -> GatewayResult<()> {
-        // For now, just clear the middleware list
-        // In a full implementation, this would recreate middleware from config
+        let config = self.config.read().await;
+        let mut new_middleware = Vec::new();
+        
+        // Create middleware instances from configuration
+        for middleware_config in &config.middleware {
+            if !middleware_config.enabled {
+                debug!("Skipping disabled middleware: {}", middleware_config.name);
+                continue;
+            }
+            
+            debug!("Creating middleware: {} (type: {})", middleware_config.name, middleware_config.middleware_type);
+            
+            let middleware_instance = self.factory
+                .create_middleware(middleware_config)
+                .await?;
+            
+            // Initialize the middleware
+            middleware_instance.initialize().await?;
+            
+            new_middleware.push(middleware_instance);
+        }
+        
+        // Sort by priority (lower numbers first)
+        new_middleware.sort_by_key(|m| m.priority());
+        
+        // Replace the middleware list
         let mut middleware = self.middleware.write().await;
-        middleware.clear();
-        info!("Reloaded middleware pipeline");
+        
+        // Shutdown old middleware
+        for old_middleware in middleware.iter() {
+            if let Err(e) = old_middleware.shutdown().await {
+                tracing::warn!("Error shutting down middleware '{}': {}", old_middleware.name(), e);
+            }
+        }
+        
+        *middleware = new_middleware;
+        
+        info!("Reloaded {} middleware instances", middleware.len());
         Ok(())
     }
 }

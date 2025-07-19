@@ -649,6 +649,9 @@ pub struct RetryPolicyConfig {
 /// Middleware configurations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MiddlewareConfigs {
+    /// Middleware pipeline configuration
+    pub pipeline: Option<MiddlewarePipelineConfig>,
+    
     /// Rate limiting configuration
     pub rate_limiting: Option<RateLimitingConfig>,
     
@@ -657,6 +660,183 @@ pub struct MiddlewareConfigs {
     
     /// Request/response transformation
     pub transformation: Option<TransformationConfig>,
+}
+
+impl Default for MiddlewareConfigs {
+    fn default() -> Self {
+        Self {
+            pipeline: Some(MiddlewarePipelineConfig::default()),
+            rate_limiting: None,
+            cors: None,
+            transformation: None,
+        }
+    }
+}
+
+/// Middleware pipeline configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MiddlewarePipelineConfig {
+    /// Whether the middleware pipeline is enabled
+    pub enabled: bool,
+    
+    /// List of middleware configurations in execution order
+    pub middleware: Vec<MiddlewareConfig>,
+    
+    /// Global pipeline settings
+    pub settings: PipelineSettings,
+}
+
+impl Default for MiddlewarePipelineConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            middleware: vec![
+                // Default built-in middleware
+                MiddlewareConfig {
+                    name: "tracing".to_string(),
+                    middleware_type: "tracing".to_string(),
+                    priority: 1,
+                    enabled: true,
+                    conditions: vec![],
+                    config: serde_json::json!({
+                        "service_name": "api-gateway",
+                        "trace_bodies": false,
+                        "trace_headers": true,
+                        "excluded_headers": ["authorization", "cookie", "x-api-key"],
+                        "custom_tags": {}
+                    }),
+                },
+                MiddlewareConfig {
+                    name: "metrics".to_string(),
+                    middleware_type: "metrics".to_string(),
+                    priority: 5,
+                    enabled: true,
+                    conditions: vec![],
+                    config: serde_json::json!({
+                        "detailed_metrics": true,
+                        "per_route_metrics": true,
+                        "per_upstream_metrics": true,
+                        "custom_labels": {}
+                    }),
+                },
+                MiddlewareConfig {
+                    name: "request_logging".to_string(),
+                    middleware_type: "request_logging".to_string(),
+                    priority: 10,
+                    enabled: true,
+                    conditions: vec![],
+                    config: serde_json::json!({
+                        "log_headers": true,
+                        "log_body": false,
+                        "log_response_headers": false,
+                        "log_response_body": false,
+                        "max_body_size": 1024,
+                        "excluded_headers": ["authorization", "cookie", "x-api-key"],
+                        "log_level": "info"
+                    }),
+                },
+                MiddlewareConfig {
+                    name: "security_headers".to_string(),
+                    middleware_type: "security_headers".to_string(),
+                    priority: 90,
+                    enabled: true,
+                    conditions: vec![],
+                    config: serde_json::json!({
+                        "x_frame_options": "DENY",
+                        "x_content_type_options": true,
+                        "x_xss_protection": "1; mode=block",
+                        "strict_transport_security": "max-age=31536000; includeSubDomains",
+                        "content_security_policy": null,
+                        "referrer_policy": "strict-origin-when-cross-origin",
+                        "custom_headers": {}
+                    }),
+                },
+            ],
+            settings: PipelineSettings::default(),
+        }
+    }
+}
+
+/// Individual middleware configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MiddlewareConfig {
+    /// Middleware name/identifier
+    pub name: String,
+    
+    /// Middleware type (built-in or plugin)
+    pub middleware_type: String,
+    
+    /// Execution priority (lower numbers execute first)
+    pub priority: i32,
+    
+    /// Whether this middleware is enabled
+    pub enabled: bool,
+    
+    /// Conditions for when this middleware should execute
+    pub conditions: Vec<MiddlewareCondition>,
+    
+    /// Middleware-specific configuration
+    pub config: serde_json::Value,
+}
+
+/// Conditions for middleware execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MiddlewareCondition {
+    /// Condition type
+    pub condition_type: ConditionType,
+    
+    /// Condition value
+    pub value: String,
+    
+    /// Whether to negate the condition
+    pub negate: bool,
+}
+
+/// Types of middleware conditions
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ConditionType {
+    /// Match request path pattern
+    PathPattern,
+    /// Match HTTP method
+    Method,
+    /// Match request header
+    Header,
+    /// Match query parameter
+    QueryParam,
+    /// Match user role
+    UserRole,
+    /// Match upstream service
+    UpstreamService,
+    /// Custom condition
+    Custom,
+}
+
+/// Pipeline execution settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineSettings {
+    /// Maximum execution time for the entire pipeline
+    #[serde(with = "humantime_serde")]
+    pub max_execution_time: std::time::Duration,
+    
+    /// Whether to continue on middleware errors
+    pub continue_on_error: bool,
+    
+    /// Whether to collect detailed execution metrics
+    pub collect_metrics: bool,
+    
+    /// Whether to log middleware execution
+    pub log_execution: bool,
+}
+
+impl Default for PipelineSettings {
+    fn default() -> Self {
+        Self {
+            max_execution_time: std::time::Duration::from_secs(30),
+            continue_on_error: false,
+            collect_metrics: true,
+            log_execution: true,
+        }
+    }
 }
 
 /// Rate limiting configuration
@@ -1097,11 +1277,7 @@ impl Default for GatewayConfig {
             server: ServerConfig::default(),
             routes: Vec::new(),
             upstreams: HashMap::new(),
-            middleware: MiddlewareConfigs {
-                rate_limiting: None,
-                cors: None,
-                transformation: None,
-            },
+            middleware: MiddlewareConfigs::default(),
             auth: AuthConfigs {
                 jwt: None,
                 api_key: None,

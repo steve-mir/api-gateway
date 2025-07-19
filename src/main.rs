@@ -79,14 +79,9 @@ async fn main() -> GatewayResult<()> {
         ..Default::default()
     };
     
-    // Create and start HTTP server with cache support
-    let server = if config.cache.is_some() {
-        info!("Creating server with cache support");
-        GatewayServer::new_with_cache(router, server_config, config.cache).await?
-    } else {
-        info!("Creating server without cache support");
-        GatewayServer::new(router, server_config)
-    };
+    // Create and start HTTP server with full configuration including middleware pipeline
+    info!("Creating server with full configuration including middleware pipeline");
+    let server = GatewayServer::new_with_full_config(router, server_config, config).await?;
     
     let gateway_addr = server.bind_addr();
     let admin_addr = server.admin_bind_addr();

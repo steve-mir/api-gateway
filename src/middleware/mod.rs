@@ -1,5 +1,6 @@
 pub mod builtin;
 pub mod cors;
+pub mod factory;
 pub mod pipeline;
 pub mod pipeline_fixed;
 pub mod rate_limiting;
@@ -17,6 +18,7 @@ pub use builtin::{
     MetricsSnapshot,
 };
 pub use cors::CorsMiddleware;
+pub use factory::{MiddlewareFactory, MiddlewareConstructor};
 pub use pipeline_fixed::{
     Middleware,
     MiddlewarePipeline,

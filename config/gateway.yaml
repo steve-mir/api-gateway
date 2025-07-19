@@ -96,6 +96,66 @@ upstreams:
       unhealthy_threshold: 3
 
 middleware:
+  pipeline:
+    enabled: true
+    middleware:
+      - name: "tracing"
+        middleware_type: "tracing"
+        priority: 1
+        enabled: true
+        conditions: []
+        config:
+          service_name: "api-gateway"
+          trace_bodies: false
+          trace_headers: true
+          excluded_headers: ["authorization", "cookie", "x-api-key"]
+          custom_tags: {}
+      
+      - name: "metrics"
+        middleware_type: "metrics"
+        priority: 5
+        enabled: true
+        conditions: []
+        config:
+          detailed_metrics: true
+          per_route_metrics: true
+          per_upstream_metrics: true
+          custom_labels: {}
+      
+      - name: "request_logging"
+        middleware_type: "request_logging"
+        priority: 10
+        enabled: true
+        conditions: []
+        config:
+          log_headers: true
+          log_body: false
+          log_response_headers: false
+          log_response_body: false
+          max_body_size: 1024
+          excluded_headers: ["authorization", "cookie", "x-api-key"]
+          log_level: "info"
+      
+      - name: "security_headers"
+        middleware_type: "security_headers"
+        priority: 90
+        enabled: true
+        conditions: []
+        config:
+          x_frame_options: "DENY"
+          x_content_type_options: true
+          x_xss_protection: "1; mode=block"
+          strict_transport_security: "max-age=31536000; includeSubDomains"
+          content_security_policy: null
+          referrer_policy: "strict-origin-when-cross-origin"
+          custom_headers: {}
+    
+    settings:
+      max_execution_time: "30s"
+      continue_on_error: false
+      collect_metrics: true
+      log_execution: true
+  
   rate_limiting:
     default_limit: 1000
     route_limits: {}

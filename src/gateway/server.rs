@@ -45,7 +45,7 @@ use tower_http::{
     trace::TraceLayer,
     compression::CompressionLayer,
 };
-use tracing::{info, warn, debug, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 /// Convert gateway cache config to cache manager config
 fn convert_cache_config(config: &CacheConfig) -> GatewayResult<crate::caching::CacheConfig> {
@@ -182,6 +182,9 @@ pub struct ServerState {
     
     /// Cache invalidation manager (optional)
     pub invalidation_manager: Option<Arc<InvalidationManager>>,
+    
+    /// Middleware pipeline for request/response processing
+    pub middleware_pipeline: Option<Arc<crate::middleware::MiddlewarePipeline>>,
 }
 
 impl ServerState {
@@ -205,6 +208,7 @@ impl ServerState {
             cache_manager: None,
             cache_middleware: None,
             invalidation_manager: None,
+            middleware_pipeline: None,
         }
     }
 
@@ -267,6 +271,123 @@ impl ServerState {
             cache_manager,
             cache_middleware,
             invalidation_manager,
+            middleware_pipeline: None,
+        })
+    }
+
+    /// Create new server state with full configuration including middleware pipeline
+    pub async fn new_with_full_config(
+        router: Router,
+        config: ServerConfig,
+        circuit_breaker_layer: CircuitBreakerLayer,
+        gateway_config: crate::core::config::GatewayConfig,
+    ) -> GatewayResult<Self> {
+        // Create WebSocket handler with configuration
+        let websocket_handler = Arc::new(WebSocketHandler::new(config.websocket.clone()));
+        
+        // Create HTTP handler with configuration
+        let http_handler = Arc::new(
+            HttpHandler::new(config.http.clone())
+                .expect("Failed to create HTTP handler")
+        );
+
+        // Initialize cache components if cache is enabled
+        let (cache_manager, cache_middleware, invalidation_manager) = if let Some(cache_cfg) = gateway_config.cache {
+            if cache_cfg.enabled {
+                // Convert config types
+                let cache_manager_config = convert_cache_config(&cache_cfg)?;
+                
+                // Create cache manager
+                let cache_manager = Arc::new(CacheManager::new(cache_manager_config).await
+                    .map_err(|e| GatewayError::internal(format!("Failed to create cache manager: {}", e)))?);
+                
+                // Create invalidation manager
+                let invalidation_manager = Arc::new(InvalidationManager::new(
+                    cache_manager.clone(),
+                    InvalidationStrategy::Immediate,
+                ));
+                
+                // Create cache middleware with global policy
+                let cache_policy = convert_cache_policy(&cache_cfg.global_policy);
+                let cache_middleware = Arc::new(CacheMiddleware::new(
+                    cache_manager.clone(),
+                    cache_policy,
+                ));
+                
+                info!("Cache system initialized successfully");
+                (Some(cache_manager), Some(cache_middleware), Some(invalidation_manager))
+            } else {
+                info!("Cache system disabled in configuration");
+                (None, None, None)
+            }
+        } else {
+            info!("No cache configuration provided");
+            (None, None, None)
+        };
+
+        // Initialize middleware pipeline if configured
+        let middleware_pipeline = if let Some(pipeline_config) = gateway_config.middleware.pipeline {
+            if pipeline_config.enabled {
+                info!("Initializing middleware pipeline with {} middleware", pipeline_config.middleware.len());
+                
+                // Convert config types
+                let pipeline_config = crate::middleware::MiddlewarePipelineConfig {
+                    middleware: pipeline_config.middleware.into_iter().map(|m| {
+                        crate::middleware::MiddlewareConfig {
+                            name: m.name,
+                            middleware_type: m.middleware_type,
+                            priority: m.priority,
+                            enabled: m.enabled,
+                            conditions: m.conditions.into_iter().map(|c| {
+                                crate::middleware::MiddlewareCondition {
+                                    condition_type: match c.condition_type {
+                                        crate::core::config::ConditionType::PathPattern => crate::middleware::ConditionType::PathPattern,
+                                        crate::core::config::ConditionType::Method => crate::middleware::ConditionType::Method,
+                                        crate::core::config::ConditionType::Header => crate::middleware::ConditionType::Header,
+                                        crate::core::config::ConditionType::QueryParam => crate::middleware::ConditionType::QueryParam,
+                                        crate::core::config::ConditionType::UserRole => crate::middleware::ConditionType::UserRole,
+                                        crate::core::config::ConditionType::UpstreamService => crate::middleware::ConditionType::UpstreamService,
+                                        crate::core::config::ConditionType::Custom => crate::middleware::ConditionType::Custom,
+                                    },
+                                    value: c.value,
+                                    negate: c.negate,
+                                }
+                            }).collect(),
+                            config: m.config,
+                        }
+                    }).collect(),
+                    settings: crate::middleware::PipelineSettings {
+                        max_execution_time: pipeline_config.settings.max_execution_time,
+                        continue_on_error: pipeline_config.settings.continue_on_error,
+                        collect_metrics: pipeline_config.settings.collect_metrics,
+                        log_execution: pipeline_config.settings.log_execution,
+                    },
+                };
+
+                let pipeline = Arc::new(crate::middleware::MiddlewarePipeline::new(pipeline_config).await
+                    .map_err(|e| GatewayError::internal(format!("Failed to create middleware pipeline: {}", e)))?);
+                
+                info!("Middleware pipeline initialized successfully");
+                Some(pipeline)
+            } else {
+                info!("Middleware pipeline disabled in configuration");
+                None
+            }
+        } else {
+            info!("No middleware pipeline configuration provided");
+            None
+        };
+        
+        Ok(Self {
+            router: Arc::new(router),
+            config,
+            circuit_breaker_layer,
+            websocket_handler,
+            http_handler,
+            cache_manager,
+            cache_middleware,
+            invalidation_manager,
+            middleware_pipeline,
         })
     }
 }
@@ -316,6 +437,26 @@ impl GatewayServer {
             config.clone(), 
             circuit_breaker_layer.clone(),
             cache_config
+        ).await?;
+        
+        Ok(Self::build_server(state, config, circuit_breaker_layer))
+    }
+
+    /// Create a new HTTP server with full configuration including middleware pipeline
+    pub async fn new_with_full_config(
+        router: Router,
+        config: ServerConfig,
+        gateway_config: crate::core::config::GatewayConfig,
+    ) -> GatewayResult<Self> {
+        // Create circuit breaker layer first
+        let circuit_breaker_layer = CircuitBreakerLayer::new(config.circuit_breaker.clone());
+        
+        // Create server state with full configuration
+        let state = ServerState::new_with_full_config(
+            router,
+            config.clone(),
+            circuit_breaker_layer.clone(),
+            gateway_config,
         ).await?;
         
         Ok(Self::build_server(state, config, circuit_breaker_layer))
@@ -520,6 +661,14 @@ impl GatewayServer {
             info!("Cache admin routes added to admin server");
         }
 
+        // Add middleware admin routes if middleware pipeline is enabled
+        if let Some(ref middleware_pipeline) = state.middleware_pipeline {
+            let middleware_admin_state = crate::admin::MiddlewareAdminState::new(middleware_pipeline.clone());
+            let middleware_routes = crate::admin::create_middleware_admin_router().with_state(middleware_admin_state);
+            admin_app = admin_app.nest("/api/v1/admin", middleware_routes);
+            info!("Middleware admin routes added to admin server");
+        }
+
         // Add health check endpoints for admin interface
         admin_app = admin_app
             .route("/health", axum::routing::get(health_check))
@@ -659,7 +808,45 @@ async fn handle_request(
     );
 
     // Create request context
-    let mut context = RequestContext::new(Arc::new(incoming_request));
+    let mut context = RequestContext::new(Arc::new(incoming_request.clone()));
+
+    // Process request through middleware pipeline if enabled
+    let processed_request = if let Some(ref middleware_pipeline) = state.middleware_pipeline {
+        debug!(
+            request_id = %context.request.id,
+            "Processing request through middleware pipeline"
+        );
+        
+        match middleware_pipeline.execute_request(incoming_request, &mut context).await {
+            Ok(processed_req) => {
+                debug!(
+                    request_id = %context.request.id,
+                    "Request processed successfully through middleware pipeline"
+                );
+                processed_req
+            }
+            Err(e) => {
+                error!(
+                    request_id = %context.request.id,
+                    error = %e,
+                    "Middleware pipeline failed to process request"
+                );
+                return create_error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Middleware pipeline error: {}", e),
+                );
+            }
+        }
+    } else {
+        debug!(
+            request_id = %context.request.id,
+            "No middleware pipeline configured, using original request"
+        );
+        incoming_request
+    };
+
+    // Update context with processed request
+    context = RequestContext::new(Arc::new(processed_request));
 
     // Apply HTTP/2 specific handling if enabled and request is HTTP/2
     if state.config.http.http2_enabled && version == axum::http::Version::HTTP_2 {
@@ -803,7 +990,40 @@ async fn handle_request(
                             }
                         }
                         
-                        convert_gateway_response_to_axum(response)
+                        // Process response through middleware pipeline if enabled
+                        let final_response = if let Some(ref middleware_pipeline) = state.middleware_pipeline {
+                            debug!(
+                                request_id = %context.request.id,
+                                "Processing response through middleware pipeline"
+                            );
+                            
+                            match middleware_pipeline.execute_response(response.clone(), &context).await {
+                                Ok(processed_response) => {
+                                    debug!(
+                                        request_id = %context.request.id,
+                                        "Response processed successfully through middleware pipeline"
+                                    );
+                                    processed_response
+                                }
+                                Err(e) => {
+                                    error!(
+                                        request_id = %context.request.id,
+                                        error = %e,
+                                        "Middleware pipeline failed to process response"
+                                    );
+                                    // Continue with original response on middleware error
+                                    response
+                                }
+                            }
+                        } else {
+                            debug!(
+                                request_id = %context.request.id,
+                                "No middleware pipeline configured, using original response"
+                            );
+                            response
+                        };
+                        
+                        convert_gateway_response_to_axum(final_response)
                     }
                     Err(error) => {
                         // Record failure with circuit breaker
