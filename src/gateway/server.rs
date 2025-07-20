@@ -25,7 +25,10 @@ use crate::caching::{CacheManager, CacheMiddleware, InvalidationManager, Invalid
 use crate::core::config::{CacheConfig, CachePolicyConfig, CacheKeyStrategy};
 
 use crate::observability::health::{HealthChecker, HealthCheckConfig};
+use crate::observability::metrics::MetricsCollector;
+use crate::admin::metrics::{MetricsAdminRouter, MetricsAdminState};
 use crate::middleware::circuit_breaker::{CircuitBreakerLayer, CircuitBreakerMiddlewareConfig};
+use axum::body::HttpBody;
 use crate::middleware::transformation::TransformationLayer;
 use crate::core::config::TransformationConfig;
 use axum::{
@@ -102,6 +105,23 @@ fn convert_key_strategy(strategy: &CacheKeyStrategy) -> crate::caching::KeyGener
         CacheKeyStrategy::Hashed { include_body } => crate::caching::KeyGenerationStrategy::Hashed { 
             include_body: *include_body 
         },
+    }
+}
+
+/// Convert core metrics config to observability metrics config
+fn convert_metrics_config(config: &crate::core::config::MetricsConfig) -> crate::observability::metrics::MetricsConfig {
+    use std::collections::HashMap;
+    
+    crate::observability::metrics::MetricsConfig {
+        enabled: config.prometheus_enabled,
+        prometheus_endpoint: config.endpoint_path.clone(),
+        collection_interval: 15, // Default value
+        max_custom_metrics: 1000, // Default value
+        latency_buckets: vec![
+            0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0
+        ],
+        global_labels: HashMap::new(), // Default empty
+        resource_monitoring: crate::observability::metrics::ResourceMonitoringConfig::default(),
     }
 }
 
@@ -185,6 +205,9 @@ pub struct ServerState {
     
     /// Middleware pipeline for request/response processing
     pub middleware_pipeline: Option<Arc<crate::middleware::MiddlewarePipeline>>,
+    
+    /// Metrics collector for monitoring and observability
+    pub metrics_collector: Option<Arc<MetricsCollector>>,
 }
 
 impl ServerState {
@@ -209,6 +232,7 @@ impl ServerState {
             cache_middleware: None,
             invalidation_manager: None,
             middleware_pipeline: None,
+            metrics_collector: None,
         }
     }
 
@@ -272,10 +296,11 @@ impl ServerState {
             cache_middleware,
             invalidation_manager,
             middleware_pipeline: None,
+            metrics_collector: None,
         })
     }
 
-    /// Create new server state with full configuration including middleware pipeline
+    /// Create new server state with full configuration including middleware pipeline and metrics
     pub async fn new_with_full_config(
         router: Router,
         config: ServerConfig,
@@ -323,6 +348,33 @@ impl ServerState {
         } else {
             info!("No cache configuration provided");
             (None, None, None)
+        };
+
+        // Initialize metrics collector if configured
+        let metrics_collector = {
+            let core_metrics_config = &gateway_config.observability.metrics;
+            if core_metrics_config.prometheus_enabled {
+                info!("Initializing metrics collector");
+                let observability_metrics_config = convert_metrics_config(core_metrics_config);
+                match MetricsCollector::new(observability_metrics_config).await {
+                    Ok(collector) => {
+                        let collector = Arc::new(collector);
+                        
+                        // Start resource monitoring background task
+                        let _monitoring_handle = collector.start_resource_monitoring();
+                        
+                        info!("Metrics collector initialized successfully");
+                        Some(collector)
+                    }
+                    Err(e) => {
+                        warn!("Failed to initialize metrics collector: {}", e);
+                        None
+                    }
+                }
+            } else {
+                info!("Metrics collection disabled in configuration");
+                None
+            }
         };
 
         // Initialize middleware pipeline if configured
@@ -388,6 +440,7 @@ impl ServerState {
             cache_middleware,
             invalidation_manager,
             middleware_pipeline,
+            metrics_collector,
         })
     }
 }
@@ -667,6 +720,17 @@ impl GatewayServer {
             let middleware_routes = crate::admin::create_middleware_admin_router().with_state(middleware_admin_state);
             admin_app = admin_app.nest("/api/v1/admin", middleware_routes);
             info!("Middleware admin routes added to admin server");
+        }
+
+        // Add metrics admin routes if metrics collector is enabled
+        if let Some(ref metrics_collector) = state.metrics_collector {
+            let metrics_admin_state = MetricsAdminState {
+                metrics_collector: metrics_collector.clone(),
+                alert_rules: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            };
+            let metrics_routes = MetricsAdminRouter::create_router(metrics_admin_state);
+            admin_app = admin_app.nest("/api/v1/admin", metrics_routes);
+            info!("Metrics admin routes added to admin server");
         }
 
         // Add health check endpoints for admin interface
@@ -1023,6 +1087,30 @@ async fn handle_request(
                             response
                         };
                         
+                        // Record metrics if metrics collector is available
+                        if let Some(ref metrics_collector) = state.metrics_collector {
+                            let duration = start_time.elapsed();
+                            let request_size = body_bytes.len() as u64;
+                            let response_size = final_response.body.len() as u64;
+                            
+                            metrics_collector.record_request(
+                                method.as_str(),
+                                uri.path(),
+                                final_response.status.as_u16(),
+                                duration,
+                                request_size,
+                                response_size,
+                            );
+                            
+                            // Record upstream metrics
+                            metrics_collector.record_upstream_request(
+                                upstream_service,
+                                method.as_str(),
+                                final_response.status.as_u16(),
+                                duration,
+                            );
+                        }
+                        
                         convert_gateway_response_to_axum(final_response)
                     }
                     Err(error) => {
@@ -1036,10 +1124,36 @@ async fn handle_request(
                             "Upstream service call failed"
                         );
                         
-                        create_error_response(
+                        let error_response = create_error_response(
                             StatusCode::BAD_GATEWAY,
                             format!("Upstream service '{}' failed: {}", upstream_service, error),
-                        )
+                        );
+                        
+                        // Record metrics for failed request
+                        if let Some(ref metrics_collector) = state.metrics_collector {
+                            let duration = start_time.elapsed();
+                            let request_size = body_bytes.len() as u64;
+                            let response_size = error_response.body().size_hint().lower() as u64;
+                            
+                            metrics_collector.record_request(
+                                method.as_str(),
+                                uri.path(),
+                                StatusCode::BAD_GATEWAY.as_u16(),
+                                duration,
+                                request_size,
+                                response_size,
+                            );
+                            
+                            // Record upstream metrics
+                            metrics_collector.record_upstream_request(
+                                upstream_service,
+                                method.as_str(),
+                                StatusCode::BAD_GATEWAY.as_u16(),
+                                duration,
+                            );
+                        }
+                        
+                        error_response
                     }
                 }
             }

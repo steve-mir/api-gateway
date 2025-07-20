@@ -43,6 +43,7 @@ pub mod transformation;
 pub mod grpc_management;
 pub mod websocket_management;
 pub mod http_management;
+pub mod metrics;
 
 pub use endpoints::{AdminRouter, AdminState};
 pub use audit::{ConfigAudit, ConfigChange, ConfigChangeType, AuditStatistics};
@@ -57,6 +58,7 @@ pub use transformation::{TransformationAdminRouter, TransformationAdminState};
 pub use grpc_management::{GrpcAdminRouter, GrpcAdminState};
 pub use websocket_management::{WebSocketAdminRouter, WebSocketAdminState};
 pub use http_management::{HttpAdminRouter, HttpAdminState};
+pub use metrics::{MetricsAdminRouter, MetricsAdminState, AlertRule, MetricsDashboard};
 
 // Re-export cache admin from caching module
 pub use crate::caching::admin::{CacheAdminRouter, CacheAdminState};

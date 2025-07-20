@@ -14,7 +14,8 @@ pub mod tracing;
 pub mod health;
 
 // Re-export commonly used types for convenience
-pub use config::{ObservabilityConfig, MetricsConfig, LogConfig, TracingConfig};
+pub use config::{ObservabilityConfig, LogConfig, TracingConfig};
+pub use metrics::MetricsConfig;
 pub use logging::StructuredLogger;
 pub use metrics::MetricsCollector;
 pub use tracing::DistributedTracer;

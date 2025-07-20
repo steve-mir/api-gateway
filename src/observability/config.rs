@@ -1,18 +1,11 @@
 use serde::{Deserialize, Serialize};
+use crate::observability::metrics::MetricsConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObservabilityConfig {
     pub metrics: MetricsConfig,
     pub logging: LogConfig,
     pub tracing: TracingConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MetricsConfig {
-    pub enabled: bool,
-    pub port: u16,
-    pub path: String,
-    pub collection_interval: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,16 +45,7 @@ impl Default for ObservabilityConfig {
     }
 }
 
-impl Default for MetricsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            port: 9090,
-            path: "/metrics".to_string(),
-            collection_interval: 15,
-        }
-    }
-}
+
 
 impl Default for LogConfig {
     fn default() -> Self {
