@@ -212,7 +212,7 @@
   - Write tests for middleware pipeline execution and error scenarios
   - _Requirements: 9.1, 9.3_
 
-- [ ] 16. Metrics Collection and Monitoring
+- [x] 16. Metrics Collection and Monitoring
   - Implement metrics collection using the metrics crate
   - Build Prometheus metrics exporter with standard gateway metrics
   - Add custom business metrics support
@@ -223,7 +223,7 @@
   - Write tests for metrics collection and export
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
 
-- [ ] 17. Structured Logging and Distributed Tracing
+- [x] 17. Structured Logging and Distributed Tracing
   - Implement structured logging using tracing and tracing-subscriber
   - Build correlation ID generation and propagation
   - Add distributed tracing integration with OpenTelemetry

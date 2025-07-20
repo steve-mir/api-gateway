@@ -70,7 +70,10 @@ metrics-exporter-prometheus = "0.13"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-opentelemetry = "0.22"
-opentelemetry = "0.21"
+opentelemetry = { version = "0.21", features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.21", features = ["trace", "rt-tokio"] }
+opentelemetry-jaeger = { version = "0.20", features = ["rt-tokio"] }
+opentelemetry-stdout = { version = "0.2", features = ["trace"] }
 
 # Configuration file watching
 notify = "6.1"
@@ -92,6 +95,9 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 
 # Random number generation
 rand = "0.8"
+
+# Regular expressions
+regex = "1.10"
 
 # Hashing
 sha2 = "0.10"

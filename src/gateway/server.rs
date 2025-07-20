@@ -26,7 +26,11 @@ use crate::core::config::{CacheConfig, CachePolicyConfig, CacheKeyStrategy};
 
 use crate::observability::health::{HealthChecker, HealthCheckConfig};
 use crate::observability::metrics::MetricsCollector;
+use crate::observability::logging::StructuredLogger;
+use crate::observability::tracing::DistributedTracer;
 use crate::admin::metrics::{MetricsAdminRouter, MetricsAdminState};
+use crate::admin::logging::{LoggingAdminRouter, LoggingAdminState};
+use crate::admin::tracing::{TracingAdminRouter, TracingAdminState};
 use crate::middleware::circuit_breaker::{CircuitBreakerLayer, CircuitBreakerMiddlewareConfig};
 use axum::body::HttpBody;
 use crate::middleware::transformation::TransformationLayer;
@@ -208,6 +212,12 @@ pub struct ServerState {
     
     /// Metrics collector for monitoring and observability
     pub metrics_collector: Option<Arc<MetricsCollector>>,
+    
+    /// Structured logger for observability
+    pub structured_logger: Option<Arc<StructuredLogger>>,
+    
+    /// Distributed tracer for observability
+    pub distributed_tracer: Option<Arc<DistributedTracer>>,
 }
 
 impl ServerState {
@@ -233,6 +243,8 @@ impl ServerState {
             invalidation_manager: None,
             middleware_pipeline: None,
             metrics_collector: None,
+            structured_logger: None,
+            distributed_tracer: None,
         }
     }
 
@@ -297,6 +309,8 @@ impl ServerState {
             invalidation_manager,
             middleware_pipeline: None,
             metrics_collector: None,
+            structured_logger: None,
+            distributed_tracer: None,
         })
     }
 
@@ -377,6 +391,72 @@ impl ServerState {
             }
         };
 
+        // Initialize structured logger
+        let structured_logger = {
+            let core_log_config = &gateway_config.observability.logging;
+            info!("Initializing structured logger");
+            
+            // Convert core config to observability config
+            let log_config = crate::observability::config::LogConfig {
+                level: core_log_config.level.clone(),
+                format: match core_log_config.format.to_lowercase().as_str() {
+                    "json" => crate::observability::config::LogFormat::Json,
+                    "text" | _ => crate::observability::config::LogFormat::Text,
+                },
+                output: match &core_log_config.output {
+                    crate::core::config::LogOutput::Stdout => crate::observability::config::LogOutput::Stdout,
+                    crate::core::config::LogOutput::File { path } => crate::observability::config::LogOutput::File(path.clone()),
+                    crate::core::config::LogOutput::Syslog { address: _ } => crate::observability::config::LogOutput::Stdout, // Fallback to stdout for syslog
+                },
+            };
+            
+            match StructuredLogger::new(log_config, "api-gateway".to_string()).await {
+                Ok(logger) => {
+                    let logger = Arc::new(logger);
+                    info!("Structured logger initialized successfully");
+                    Some(logger)
+                }
+                Err(e) => {
+                    warn!("Failed to initialize structured logger: {}", e);
+                    None
+                }
+            }
+        };
+
+        // Initialize distributed tracer
+        let distributed_tracer = {
+            let core_tracing_config = &gateway_config.observability.tracing;
+            if core_tracing_config.enabled {
+                info!("Initializing distributed tracer");
+                
+                // Convert core config to observability config
+                let tracing_config = crate::observability::config::TracingConfig {
+                    enabled: core_tracing_config.enabled,
+                    service_name: "api-gateway".to_string(), // Default service name
+                    jaeger_endpoint: match &core_tracing_config.backend {
+                        crate::core::config::TracingBackend::Jaeger { endpoint } => Some(endpoint.clone()),
+                        _ => None,
+                    },
+                    sample_rate: core_tracing_config.sampling_rate,
+                };
+                
+                match DistributedTracer::new(tracing_config) {
+                    Ok(tracer) => {
+                        let tracer = Arc::new(tracer);
+                        info!("Distributed tracer initialized successfully");
+                        Some(tracer)
+                    }
+                    Err(e) => {
+                        warn!("Failed to initialize distributed tracer: {}", e);
+                        None
+                    }
+                }
+            } else {
+                info!("Distributed tracing disabled in configuration");
+                None
+            }
+        };
+
         // Initialize middleware pipeline if configured
         let middleware_pipeline = if let Some(pipeline_config) = gateway_config.middleware.pipeline {
             if pipeline_config.enabled {
@@ -441,6 +521,8 @@ impl ServerState {
             invalidation_manager,
             middleware_pipeline,
             metrics_collector,
+            structured_logger,
+            distributed_tracer,
         })
     }
 }
@@ -485,12 +567,15 @@ impl GatewayServer {
         let circuit_breaker_layer = CircuitBreakerLayer::new(config.circuit_breaker.clone());
         
         // Create server state with cache configuration
-        let state = ServerState::new_with_cache(
+        let mut state = ServerState::new_with_cache(
             router, 
             config.clone(), 
             circuit_breaker_layer.clone(),
             cache_config
         ).await?;
+        
+        // Initialize observability components
+        Self::initialize_observability(&mut state, &config).await?;
         
         Ok(Self::build_server(state, config, circuit_breaker_layer))
     }
@@ -513,6 +598,57 @@ impl GatewayServer {
         ).await?;
         
         Ok(Self::build_server(state, config, circuit_breaker_layer))
+    }
+
+    /// Initialize observability components (logging and tracing)
+    async fn initialize_observability(state: &mut ServerState, _config: &ServerConfig) -> GatewayResult<()> {
+        // Create default observability config if not provided
+        let default_observability_config = crate::observability::ObservabilityConfig::default();
+        
+        // Initialize structured logger
+        let structured_logger = {
+            let log_config = &default_observability_config.logging;
+            info!("Initializing structured logger");
+            match StructuredLogger::new(log_config.clone(), "api-gateway".to_string()).await {
+                Ok(logger) => {
+                    let logger = Arc::new(logger);
+                    info!("Structured logger initialized successfully");
+                    Some(logger)
+                }
+                Err(e) => {
+                    warn!("Failed to initialize structured logger: {}", e);
+                    None
+                }
+            }
+        };
+
+        // Initialize distributed tracer
+        let distributed_tracer = {
+            let tracing_config = &default_observability_config.tracing;
+            if tracing_config.enabled {
+                info!("Initializing distributed tracer");
+                match DistributedTracer::new(tracing_config.clone()) {
+                    Ok(tracer) => {
+                        let tracer = Arc::new(tracer);
+                        info!("Distributed tracer initialized successfully");
+                        Some(tracer)
+                    }
+                    Err(e) => {
+                        warn!("Failed to initialize distributed tracer: {}", e);
+                        None
+                    }
+                }
+            } else {
+                info!("Distributed tracing disabled in configuration");
+                None
+            }
+        };
+
+        // Update state with observability components
+        state.structured_logger = structured_logger;
+        state.distributed_tracer = distributed_tracer;
+
+        Ok(())
     }
 
     /// Build the server with the given state and configuration
@@ -731,6 +867,29 @@ impl GatewayServer {
             let metrics_routes = MetricsAdminRouter::create_router(metrics_admin_state);
             admin_app = admin_app.nest("/api/v1/admin", metrics_routes);
             info!("Metrics admin routes added to admin server");
+        }
+
+        // Add logging admin routes if structured logger is enabled
+        if let Some(ref structured_logger) = state.structured_logger {
+            let logging_admin_state = LoggingAdminState {
+                logger: structured_logger.clone(),
+                audit_logs: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            };
+            let logging_routes = LoggingAdminRouter::create_router(logging_admin_state);
+            admin_app = admin_app.nest("/api/v1/admin/logging", logging_routes);
+            info!("Logging admin routes added to admin server");
+        }
+
+        // Add tracing admin routes if distributed tracer is enabled
+        if let (Some(ref distributed_tracer), Some(ref structured_logger)) = (&state.distributed_tracer, &state.structured_logger) {
+            let tracing_admin_state = TracingAdminState {
+                tracer: distributed_tracer.clone(),
+                logger: structured_logger.clone(),
+                audit_logs: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            };
+            let tracing_routes = TracingAdminRouter::create_router(tracing_admin_state);
+            admin_app = admin_app.nest("/api/v1/admin/tracing", tracing_routes);
+            info!("Tracing admin routes added to admin server");
         }
 
         // Add health check endpoints for admin interface
