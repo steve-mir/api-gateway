@@ -1,5 +1,6 @@
 pub mod builtin;
 pub mod cors;
+pub mod error_handling;
 pub mod factory;
 pub mod pipeline;
 pub mod pipeline_fixed;
@@ -35,3 +36,4 @@ pub use request_logging::RequestLoggingMiddleware;
 pub use timeout::TimeoutMiddleware;
 pub use circuit_breaker::{CircuitBreakerLayer, CircuitBreakerMiddleware, CircuitBreakerService};
 pub use transformation::{TransformationMiddleware, TransformationLayer, TransformationService};
+pub use error_handling::{ErrorHandlingState, error_handling_middleware, create_error_handling_layer};

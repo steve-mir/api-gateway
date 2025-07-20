@@ -99,6 +99,9 @@ rand = "0.8"
 # Regular expressions
 regex = "1.10"
 
+# Template engine for error pages
+tera = "1.19"
+
 # Hashing
 sha2 = "0.10"
 blake3 = "1.5"

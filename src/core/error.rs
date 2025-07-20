@@ -30,7 +30,7 @@ pub type GatewayResult<T> = Result<T, GatewayError>;
 /// Each variant represents a different category of error that can occur.
 /// The `#[error("...")]` attribute from `thiserror` automatically implements
 /// the `Display` trait with the specified error message.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum GatewayError {
     /// Configuration-related errors (invalid config, missing files, etc.)
     #[error("Configuration error: {message}")]
@@ -89,24 +89,24 @@ pub enum GatewayError {
     Internal { message: String },
 
     /// I/O errors (file operations, network errors, etc.)
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("I/O error: {message}")]
+    Io { message: String },
 
     /// JSON serialization/deserialization errors
-    #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
+    #[error("JSON error: {message}")]
+    Json { message: String },
 
     /// YAML parsing errors for configuration files
-    #[error("YAML error: {0}")]
-    Yaml(#[from] serde_yaml::Error),
+    #[error("YAML error: {message}")]
+    Yaml { message: String },
 
     /// HTTP client errors when making upstream requests
-    #[error("HTTP client error: {0}")]
-    HttpClient(#[from] reqwest::Error),
+    #[error("HTTP client error: {message}")]
+    HttpClient { message: String },
 
     /// JWT token validation errors
-    #[error("JWT error: {0}")]
-    Jwt(#[from] jsonwebtoken::errors::Error),
+    #[error("JWT error: {message}")]
+    Jwt { message: String },
 }
 
 impl GatewayError {
@@ -180,11 +180,11 @@ impl GatewayError {
             Self::ResponseTransformation { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Middleware { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Internal { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Json(_) => StatusCode::BAD_REQUEST,
-            Self::Yaml(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::HttpClient(_) => StatusCode::BAD_GATEWAY,
-            Self::Jwt(_) => StatusCode::UNAUTHORIZED,
+            Self::Io { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Json { .. } => StatusCode::BAD_REQUEST,
+            Self::Yaml { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::HttpClient { .. } => StatusCode::BAD_GATEWAY,
+            Self::Jwt { .. } => StatusCode::UNAUTHORIZED,
         }
     }
 
@@ -197,8 +197,8 @@ impl GatewayError {
             Self::ServiceUnavailable { .. } => true,
             Self::Timeout { .. } => true,
             Self::LoadBalancing { .. } => true,
-            Self::HttpClient(err) => err.is_timeout() || err.is_connect(),
-            Self::Io(_) => true,
+            Self::HttpClient { .. } => true,
+            Self::Io { .. } => true,
             _ => false,
         }
     }
@@ -211,7 +211,7 @@ impl GatewayError {
         match self {
             Self::ServiceUnavailable { .. } => true,
             Self::Timeout { .. } => true,
-            Self::HttpClient(err) => err.is_timeout() || err.is_connect(),
+            Self::HttpClient { .. } => true,
             _ => false,
         }
     }
@@ -222,6 +222,51 @@ impl From<Infallible> for GatewayError {
     fn from(infallible: Infallible) -> Self {
         // This should never be called since Infallible can never be constructed
         match infallible {}
+    }
+}
+
+/// Implement conversion from std::io::Error
+impl From<std::io::Error> for GatewayError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io {
+            message: err.to_string(),
+        }
+    }
+}
+
+/// Implement conversion from serde_json::Error
+impl From<serde_json::Error> for GatewayError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::Json {
+            message: err.to_string(),
+        }
+    }
+}
+
+/// Implement conversion from serde_yaml::Error
+impl From<serde_yaml::Error> for GatewayError {
+    fn from(err: serde_yaml::Error) -> Self {
+        Self::Yaml {
+            message: err.to_string(),
+        }
+    }
+}
+
+/// Implement conversion from reqwest::Error
+impl From<reqwest::Error> for GatewayError {
+    fn from(err: reqwest::Error) -> Self {
+        Self::HttpClient {
+            message: err.to_string(),
+        }
+    }
+}
+
+/// Implement conversion from jsonwebtoken::errors::Error
+impl From<jsonwebtoken::errors::Error> for GatewayError {
+    fn from(err: jsonwebtoken::errors::Error) -> Self {
+        Self::Jwt {
+            message: err.to_string(),
+        }
     }
 }
 
@@ -251,7 +296,7 @@ impl IntoResponse for GatewayError {
 
 impl GatewayError {
     /// Get a string representation of the error type for API responses
-    fn error_type(&self) -> &'static str {
+    pub fn error_type(&self) -> &'static str {
         match self {
             Self::Configuration { .. } => "configuration_error",
             Self::Authentication { .. } => "authentication_error",
@@ -267,11 +312,11 @@ impl GatewayError {
             Self::ResponseTransformation { .. } => "response_transformation_error",
             Self::Middleware { .. } => "middleware_error",
             Self::Internal { .. } => "internal_error",
-            Self::Io(_) => "io_error",
-            Self::Json(_) => "json_error",
-            Self::Yaml(_) => "yaml_error",
-            Self::HttpClient(_) => "http_client_error",
-            Self::Jwt(_) => "jwt_error",
+            Self::Io { .. } => "io_error",
+            Self::Json { .. } => "json_error",
+            Self::Yaml { .. } => "yaml_error",
+            Self::HttpClient { .. } => "http_client_error",
+            Self::Jwt { .. } => "jwt_error",
         }
     }
 }

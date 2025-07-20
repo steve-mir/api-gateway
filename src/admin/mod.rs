@@ -46,6 +46,7 @@ pub mod http_management;
 pub mod metrics;
 pub mod logging;
 pub mod tracing;
+pub mod error_tracking;
 
 pub use endpoints::{AdminRouter, AdminState};
 pub use audit::{ConfigAudit, ConfigChange, ConfigChangeType, AuditStatistics};
@@ -63,6 +64,7 @@ pub use http_management::{HttpAdminRouter, HttpAdminState};
 pub use metrics::{MetricsAdminRouter, MetricsAdminState, AlertRule, MetricsDashboard};
 pub use logging::{LoggingAdminRouter, LoggingAdminState};
 pub use tracing::{TracingAdminRouter, TracingAdminState};
+pub use error_tracking::{ErrorTrackingAdminRouter, ErrorTrackingAdminState};
 
 // Re-export cache admin from caching module
 pub use crate::caching::admin::{CacheAdminRouter, CacheAdminState};
