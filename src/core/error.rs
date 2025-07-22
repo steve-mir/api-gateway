@@ -160,6 +160,14 @@ impl GatewayError {
         }
     }
 
+    /// Create a validation error with a custom message
+    pub fn validation<S: Into<String>>(message: S) -> Self {
+        Self::RequestValidation {
+            field: "general".to_string(),
+            reason: message.into(),
+        }
+    }
+
     /// Get the appropriate HTTP status code for this error
     ///
     /// This method maps internal error types to HTTP status codes that should

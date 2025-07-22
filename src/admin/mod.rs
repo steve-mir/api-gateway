@@ -34,6 +34,7 @@ pub mod endpoints;
 pub mod audit;
 pub mod config_manager;
 pub mod service_management;
+pub mod deployment;
 pub mod load_balancer;
 pub mod health;
 pub mod middleware;
@@ -52,6 +53,11 @@ pub use endpoints::{AdminRouter, AdminState};
 pub use audit::{ConfigAudit, ConfigChange, ConfigChangeType, AuditStatistics};
 pub use config_manager::{RuntimeConfigManager, ConfigChangeEvent};
 pub use service_management::{ServiceManagementRouter, ServiceManagementState, ServicePersistence};
+pub use deployment::{
+    DeploymentRouter, DeploymentState, ServiceVersionManager, BlueGreenDeploymentManager,
+    FeatureFlagManager, ServiceMeshIntegration, TenantConfigManager, ServiceVersion,
+    BlueGreenDeployment, FeatureFlag, ServiceMeshConfig, Tenant, EvaluationContext
+};
 pub use load_balancer::{LoadBalancerAdminRouter, LoadBalancerAdminState};
 pub use health::{HealthAdminRouter, HealthAdminState};
 pub use middleware::{MiddlewareAdminState, create_middleware_admin_router};
