@@ -68,3 +68,6 @@ pub use error_tracking::{ErrorTrackingAdminRouter, ErrorTrackingAdminState};
 
 // Re-export cache admin from caching module
 pub use crate::caching::admin::{CacheAdminRouter, CacheAdminState};
+
+// Re-export traffic admin from traffic module (stub implementation)
+pub use crate::traffic::admin_stub::{TrafficAdminRouter, TrafficAdminState};

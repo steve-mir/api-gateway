@@ -1,0 +1,181 @@
+# Traffic Management Admin Configuration Example
+# This file shows how to configure the traffic management admin endpoints
+
+# Gateway configuration
+gateway:
+  name: "traffic-gateway"
+  listen_address: "0.0.0.0:8080"
+  admin_address: "0.0.0.0:8081"
+
+# Admin interface configuration
+admin:
+  enabled: true
+  authentication:
+    type: "bearer_token"
+    token: "${ADMIN_TOKEN}"
+  
+  # Enable traffic management endpoints
+  traffic_management:
+    enabled: true
+    
+    # Default traffic configuration
+    default_config:
+      queue:
+        max_queue_size: 10000
+        backpressure_threshold: 0.8
+        timeout: "30s"
+        priority_levels: 3
+      
+      shaping:
+        global_rps_limit: 1000
+        per_client_rps_limit: 100
+        burst_size: 50
+        window_size: "1s"
+        
+      priority:
+        enabled: true
+        default_priority: 2
+        
+      shutdown:
+        grace_period: "30s"
+        drain_timeout: "10s"
+        force_timeout: "60s"
+
+# Traffic management configuration
+traffic:
+  # Request queue settings
+  queue:
+    max_queue_size: 5000
+    backpressure_threshold: 0.75
+    timeout: "30s"
+    priority_levels: 3
+    
+  # Traffic shaping settings
+  shaping:
+    global_rps_limit: 500
+    per_client_rps_limit: 50
+    burst_size: 25
+    window_size: "1s"
+    
+  # Priority management
+  priority:
+    enabled: true
+    default_priority: 2
+    rules:
+      - id: "premium-users"
+        name: "Premium User Priority"
+        condition: "headers.user-tier == 'premium'"
+        priority: 1
+        enabled: true
+        
+      - id: "api-clients"
+        name: "API Client Priority"
+        condition: "headers.client-type == 'api'"
+        priority: 1
+        enabled: true
+        
+      - id: "health-checks"
+        name: "Health Check Priority"
+        condition: "path == '/health'"
+        priority: 0
+        enabled: true
+        
+  # Graceful shutdown settings
+  shutdown:
+    grace_period: "30s"
+    drain_timeout: "10s"
+    force_timeout: "60s"
+    
+  # A/B testing and traffic splitting
+  ab_tests:
+    - id: "homepage-redesign"
+      name: "Homepage Redesign Test"
+      description: "Testing new homepage layout"
+      status: "running"
+      variants:
+        - name: "control"
+          weight: 50
+          upstream: "homepage-v1"
+        - name: "treatment"
+          weight: 50
+          upstream: "homepage-v2"
+      traffic_allocation: 100
+      duration: "7d"
+      
+  traffic_splits:
+    - id: "canary-deployment"
+      name: "Canary Deployment"
+      description: "Gradual rollout of new version"
+      enabled: true
+      variants:
+        - name: "stable"
+          weight: 90
+          upstream: "app-v1"
+        - name: "canary"
+          weight: 10
+          upstream: "app-v2"
+
+# Upstreams configuration
+upstreams:
+  homepage-v1:
+    servers:
+      - address: "homepage-v1:8080"
+        weight: 1
+    health_check:
+      path: "/health"
+      interval: "10s"
+      
+  homepage-v2:
+    servers:
+      - address: "homepage-v2:8080"
+        weight: 1
+    health_check:
+      path: "/health"
+      interval: "10s"
+      
+  app-v1:
+    servers:
+      - address: "app-v1:8080"
+        weight: 1
+    health_check:
+      path: "/health"
+      interval: "10s"
+      
+  app-v2:
+    servers:
+      - address: "app-v2:8080"
+        weight: 1
+    health_check:
+      path: "/health"
+      interval: "10s"
+
+# Routes configuration
+routes:
+  - id: "homepage"
+    path: "/"
+    methods: ["GET"]
+    upstream: "homepage-v1"
+    
+  - id: "api"
+    path: "/api/*"
+    methods: ["GET", "POST", "PUT", "DELETE"]
+    upstream: "app-v1"
+    
+  - id: "health"
+    path: "/health"
+    methods: ["GET"]
+    upstream: "app-v1"
+
+# Observability configuration
+observability:
+  metrics:
+    enabled: true
+    endpoint: "/metrics"
+    
+  tracing:
+    enabled: true
+    jaeger_endpoint: "http://jaeger:14268/api/traces"
+    
+  logging:
+    level: "info"
+    format: "json"

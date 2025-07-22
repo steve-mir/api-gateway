@@ -13,6 +13,7 @@
 
 use crate::core::config::GatewayConfig;
 use crate::admin::{ConfigAudit, ConfigChange, ConfigChangeType, RuntimeConfigManager, ServiceManagementRouter, ServiceManagementState, LoadBalancerAdminRouter, LoadBalancerAdminState};
+use crate::traffic::admin_stub::{TrafficAdminRouter, TrafficAdminState};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -33,6 +34,7 @@ pub struct AdminState {
     pub audit: Arc<ConfigAudit>,
     pub service_management: Option<ServiceManagementState>,
     pub load_balancer: Option<LoadBalancerAdminState>,
+    pub traffic_management: Option<TrafficAdminState>,
 }
 
 /// Admin router for configuration management endpoints
@@ -80,6 +82,11 @@ impl AdminRouter {
         // Add load balancer admin routes if load balancer management is enabled
         if let Some(load_balancer_state) = state.load_balancer {
             router = router.nest("/load-balancer", LoadBalancerAdminRouter::create_router(load_balancer_state));
+        }
+
+        // Add traffic management routes if traffic management is enabled
+        if let Some(traffic_management_state) = state.traffic_management {
+            router = router.nest("/traffic", TrafficAdminRouter::create_router(traffic_management_state));
         }
 
         router

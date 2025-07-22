@@ -111,6 +111,7 @@ dependencies = [
  "consul",
  "criterion",
  "dashmap",
+ "fastrand 2.3.0",
  "flate2",
  "futures",
  "futures-util",

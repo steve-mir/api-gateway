@@ -14,6 +14,7 @@ pub mod discovery;
 pub mod routing;
 pub mod observability;
 pub mod caching;
+pub mod traffic;
 pub mod admin;
 
 // Re-export commonly used types
