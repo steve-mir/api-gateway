@@ -837,4 +837,186 @@ async fn list_sessions(
             ip_address: session.ip_address,
             user_agent: session.user_agent,
         })
-       
+             
+  .collect();
+
+    Ok(Json(ListSessionsResponse {
+        sessions: session_info,
+        total: sessions.len(),
+    }))
+}
+
+/// Revoke a specific session endpoint
+async fn revoke_session(
+    State(state): State<AdminApiState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Result<Json<AdminLogoutResponse>, (StatusCode, Json<ErrorResponse>)> {
+    state
+        .session_manager
+        .revoke_session(&session_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "Failed to revoke session".to_string(),
+                    details: Some(e.to_string()),
+                }),
+            )
+        })?;
+
+    Ok(Json(AdminLogoutResponse {
+        success: true,
+        message: "Session revoked successfully".to_string(),
+    }))
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Extract session token from request
+fn extract_session_token(request: &Request) -> Result<String, StatusCode> {
+    // Try Authorization header first
+    if let Some(auth_header) = request.headers().get("authorization") {
+        if let Ok(auth_str) = auth_header.to_str() {
+            if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                return Ok(token.to_string());
+            }
+        }
+    }
+
+    // Try cookie
+    if let Some(cookie_header) = request.headers().get("cookie") {
+        if let Ok(cookie_str) = cookie_header.to_str() {
+            for cookie in cookie_str.split(';') {
+                let cookie = cookie.trim();
+                if let Some(session_id) = cookie.strip_prefix("session_id=") {
+                    return Ok(session_id.to_string());
+                }
+            }
+        }
+    }
+
+    Err(StatusCode::UNAUTHORIZED)
+}
+
+/// Extract client IP from request
+fn extract_client_ip(request: &Request) -> String {
+    // Try X-Forwarded-For header first
+    if let Some(forwarded) = request.headers().get("x-forwarded-for") {
+        if let Ok(forwarded_str) = forwarded.to_str() {
+            if let Some(ip) = forwarded_str.split(',').next() {
+                return ip.trim().to_string();
+            }
+        }
+    }
+
+    // Try X-Real-IP header
+    if let Some(real_ip) = request.headers().get("x-real-ip") {
+        if let Ok(ip_str) = real_ip.to_str() {
+            return ip_str.to_string();
+        }
+    }
+
+    // Fallback to connection info (would need to be passed through middleware)
+    "unknown".to_string()
+}
+
+/// Determine endpoint type for rate limiting
+fn determine_endpoint_type(path: &str) -> AdminEndpointType {
+    if path.starts_with("/auth/") {
+        AdminEndpointType::Auth
+    } else if path.contains("/config/") || path.contains("/services/") || path.contains("/users/") {
+        AdminEndpointType::Sensitive
+    } else {
+        AdminEndpointType::General
+    }
+}
+
+// ============================================================================
+// Request/Response Types
+// ============================================================================
+
+#[derive(Debug, Serialize)]
+struct ApiInfoResponse {
+    name: String,
+    version: String,
+    description: String,
+    supported_versions: Vec<ApiVersion>,
+    features: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ApiVersionsResponse {
+    versions: Vec<ApiVersion>,
+    default_version: String,
+}
+
+#[derive(Debug, Serialize)]
+struct HealthResponse {
+    status: String,
+    timestamp: DateTime<Utc>,
+    version: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminLoginRequest {
+    token: String,
+    ip_address: Option<String>,
+    user_agent: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminLoginResponse {
+    session_id: String,
+    expires_at: DateTime<Utc>,
+    user_id: String,
+    roles: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminLogoutRequest {
+    session_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminLogoutResponse {
+    success: bool,
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RefreshSessionRequest {
+    session_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RefreshSessionResponse {
+    session_id: String,
+    expires_at: DateTime<Utc>,
+    last_activity: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct ListSessionsResponse {
+    sessions: Vec<SessionInfo>,
+    total: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionInfo {
+    session_id: String,
+    user_id: String,
+    created_at: DateTime<Utc>,
+    last_activity: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    ip_address: String,
+    user_agent: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorResponse {
+    error: String,
+    details: Option<String>,
+}
