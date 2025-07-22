@@ -210,8 +210,9 @@ pub enum RoutingOperator {
     Regex,
     In,
     NotIn,
-}//
- ============================================================================
+}
+
+// ============================================================================
 // Blue-Green Deployment Management
 // ============================================================================
 
@@ -355,8 +356,9 @@ pub enum ComparisonOperator {
     GreaterThanOrEqual,
     Equal,
     NotEqual,
-}// ======
-======================================================================
+}
+
+// ============================================================================
 // Feature Flag Management
 // ============================================================================
 
@@ -455,7 +457,7 @@ impl FeatureFlagManager {
                     value.hash(&mut hasher);
                     let hash_value = hasher.finish();
                     let percentage: f64 = condition.value.parse().unwrap_or(0.0);
-                    (hash_value % 100) as f64 < percentage
+                    ((hash_value % 100) as f64) < percentage
                 }
             }
         } else {
@@ -512,8 +514,9 @@ pub struct EvaluationContext {
     pub tenant_id: Option<String>,
     pub user_role: Option<String>,
     pub custom_attributes: HashMap<String, String>,
-}/
-/ ============================================================================
+}
+
+// ============================================================================
 // Service Mesh Integration
 // ============================================================================
 
@@ -656,8 +659,9 @@ pub struct RetryPolicy {
     pub attempts: u32,
     pub per_try_timeout: chrono::Duration,
     pub retry_on: Vec<String>,
-}// 
-============================================================================
+}
+
+// ============================================================================
 // Multi-Tenant Configuration Management
 // ============================================================================
 
@@ -767,8 +771,9 @@ pub struct TenantService {
     pub config_overrides: HashMap<String, serde_json::Value>,
     pub access_permissions: Vec<String>,
     pub created_at: DateTime<Utc>,
-}// =
-===========================================================================
+}
+
+// ============================================================================
 // API Endpoint Implementations
 // ============================================================================
 
@@ -1007,8 +1012,9 @@ async fn abort_deployment(
             }),
         ))
     }
-}// F
-eature Flag Endpoints
+}
+
+// Feature Flag Endpoints
 async fn list_feature_flags(
     State(state): State<DeploymentState>,
 ) -> Result<Json<ListFlagsResponse>, (StatusCode, Json<ErrorResponse>)> {
@@ -1334,8 +1340,9 @@ async fn add_tenant_service(
         })))?;
 
     Ok(Json(service))
-}/
-/ ============================================================================
+}
+
+// ============================================================================
 // Request/Response Types
 // ============================================================================
 
