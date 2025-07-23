@@ -48,6 +48,7 @@ pub mod metrics;
 pub mod logging;
 pub mod tracing;
 pub mod error_tracking;
+pub mod observability;
 
 pub use endpoints::{AdminRouter, AdminState};
 pub use audit::{ConfigAudit, ConfigChange, ConfigChangeType, AuditStatistics};
@@ -71,6 +72,11 @@ pub use metrics::{MetricsAdminRouter, MetricsAdminState, AlertRule, MetricsDashb
 pub use logging::{LoggingAdminRouter, LoggingAdminState};
 pub use tracing::{TracingAdminRouter, TracingAdminState};
 pub use error_tracking::{ErrorTrackingAdminRouter, ErrorTrackingAdminState};
+pub use observability::{
+    AdminObservabilityState, AdminObservabilityRouter, AdminMetricsCollector, AdminAuditLogger,
+    AdminPerformanceMonitor, AdminUsageAnalytics, ConfigChangeImpactAnalyzer, AdminNotificationSystem,
+    AdminMetrics, AdminAuditEvent, ImpactLevel, NotificationType, NotificationSeverity
+};
 
 // Re-export cache admin from caching module
 pub use crate::caching::admin::{CacheAdminRouter, CacheAdminState};
