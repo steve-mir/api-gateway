@@ -49,6 +49,10 @@ pub mod logging;
 pub mod tracing;
 pub mod error_tracking;
 pub mod observability;
+pub mod security;
+pub mod security_scanner;
+pub mod compliance;
+pub mod backup_recovery;
 
 pub use endpoints::{AdminRouter, AdminState};
 pub use audit::{ConfigAudit, ConfigChange, ConfigChangeType, AuditStatistics};
@@ -76,6 +80,23 @@ pub use observability::{
     AdminObservabilityState, AdminObservabilityRouter, AdminMetricsCollector, AdminAuditLogger,
     AdminPerformanceMonitor, AdminUsageAnalytics, ConfigChangeImpactAnalyzer, AdminNotificationSystem,
     AdminMetrics, AdminAuditEvent, ImpactLevel, NotificationType, NotificationSeverity
+};
+pub use security::{
+    AdminSecurityState, create_admin_security_router, ApprovalWorkflowManager, AccessControlManager,
+    SessionMonitor, ApprovalWorkflow, AdminOperation, ApprovalStatus, UserPermissions, MonitoredSession,
+    SessionAnomaly, AccessContext
+};
+pub use security_scanner::{
+    SecurityScannerState, create_security_scanner_router, SecurityScanner, ScanResult, Vulnerability,
+    VulnerabilityType, VulnerabilitySeverity, ScanConfig, ScanType
+};
+pub use compliance::{
+    ComplianceState, create_compliance_router, ComplianceManager, ComplianceReport, ComplianceFramework,
+    ComplianceFinding, ComplianceRecommendation, ComplianceDashboard
+};
+pub use backup_recovery::{
+    BackupRecoveryState, create_backup_recovery_router, BackupRecoveryManager, BackupRecord,
+    RecoveryPlan, BackupType, RestoreType, RecoveryExecution
 };
 
 // Re-export cache admin from caching module

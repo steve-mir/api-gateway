@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+// Removed unused imports
 use chrono::{DateTime, Utc};
 
 /// Deployment management state

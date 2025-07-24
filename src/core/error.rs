@@ -168,6 +168,14 @@ impl GatewayError {
         }
     }
 
+    /// Create an invalid input error with a custom message
+    pub fn invalid_input<S: Into<String>>(message: S) -> Self {
+        Self::RequestValidation {
+            field: "input".to_string(),
+            reason: message.into(),
+        }
+    }
+
     /// Get the appropriate HTTP status code for this error
     ///
     /// This method maps internal error types to HTTP status codes that should

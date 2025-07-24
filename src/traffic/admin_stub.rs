@@ -10,10 +10,8 @@ use axum::{
     routing::get,
     Router,
 };
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use uuid::Uuid;
-use chrono::{DateTime, Utc};
+use serde::Serialize;
+// Removed unused imports
 
 /// Traffic management admin state (stub)
 #[derive(Clone)]
