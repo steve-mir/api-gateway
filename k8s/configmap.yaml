@@ -1,0 +1,252 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-config
+  namespace: api-gateway
+  labels:
+    app.kubernetes.io/name: api-gateway
+    app.kubernetes.io/component: config
+data:
+  gateway.yaml: |
+    server:
+      http_port: 8080
+      https_port: 8443
+      metrics_port: 9090
+      bind_address: "0.0.0.0"
+      timeouts:
+        request_timeout: "30s"
+        keepalive_timeout: "60s"
+        upstream_timeout: "10s"
+      max_request_size: 10485760  # 10MB
+
+    routes:
+      - path: "/api/v1/users"
+        methods: ["GET", "POST"]
+        upstream: "user-service"
+        middleware: []
+        timeout: "30s"
+        auth_required: true
+        required_roles: []
+      
+      - path: "/api/v1/users/{id}"
+        methods: ["GET", "PUT", "DELETE"]
+        upstream: "user-service"
+        middleware: []
+        timeout: "30s"
+        auth_required: true
+        required_roles: []
+
+      - path: "/health"
+        methods: ["GET"]
+        upstream: "health-service"
+        middleware: []
+        timeout: "10s"
+        auth_required: false
+        required_roles: []
+
+      - path: "/api/v1/products"
+        methods: ["GET", "POST"]
+        upstream: "product-service"
+        middleware: []
+        timeout: "30s"
+        auth_required: false
+        required_roles: []
+      
+      - path: "/api/v1/products/{id}"
+        methods: ["GET", "PUT", "DELETE"]
+        upstream: "product-service"
+        middleware: []
+        timeout: "30s"
+        auth_required: false
+        required_roles: []
+
+    upstreams:
+      user-service:
+        discovery:
+          type: "Kubernetes"
+          service_name: "user-service"
+          namespace: "default"
+        load_balancer:
+          type: "RoundRobin"
+        health_check:
+          path: "/health"
+          interval: "30s"
+          timeout: "5s"
+          healthy_threshold: 2
+          unhealthy_threshold: 3
+      
+      health-service:
+        discovery:
+          type: "Kubernetes"
+          service_name: "health-service"
+          namespace: "default"
+        load_balancer:
+          type: "RoundRobin"
+        health_check:
+          path: "/health"
+          interval: "30s"
+          timeout: "5s"
+          healthy_threshold: 2
+          unhealthy_threshold: 3
+
+      product-service:
+        discovery:
+          type: "Kubernetes"
+          service_name: "product-service"
+          namespace: "default"
+        load_balancer:
+          type: "RoundRobin"
+        health_check:
+          path: "/health"
+          interval: "30s"
+          timeout: "5s"
+          healthy_threshold: 2
+          unhealthy_threshold: 3
+
+    middleware:
+      pipeline:
+        enabled: true
+        middleware:
+          - name: "tracing"
+            middleware_type: "tracing"
+            priority: 1
+            enabled: true
+            conditions: []
+            config:
+              service_name: "api-gateway"
+              trace_bodies: false
+              trace_headers: true
+              excluded_headers: ["authorization", "cookie", "x-api-key"]
+              custom_tags: {}
+          
+          - name: "metrics"
+            middleware_type: "metrics"
+            priority: 5
+            enabled: true
+            conditions: []
+            config:
+              detailed_metrics: true
+              per_route_metrics: true
+              per_upstream_metrics: true
+              custom_labels: {}
+          
+          - name: "request_logging"
+            middleware_type: "request_logging"
+            priority: 10
+            enabled: true
+            conditions: []
+            config:
+              log_headers: true
+              log_body: false
+              log_response_headers: false
+              log_response_body: false
+              max_body_size: 1024
+              excluded_headers: ["authorization", "cookie", "x-api-key"]
+              log_level: "info"
+          
+          - name: "security_headers"
+            middleware_type: "security_headers"
+            priority: 90
+            enabled: true
+            conditions: []
+            config:
+              x_frame_options: "DENY"
+              x_content_type_options: true
+              x_xss_protection: "1; mode=block"
+              strict_transport_security: "max-age=31536000; includeSubDomains"
+              content_security_policy: null
+              referrer_policy: "strict-origin-when-cross-origin"
+              custom_headers: {}
+        
+        settings:
+          max_execution_time: "30s"
+          continue_on_error: false
+          collect_metrics: true
+          log_execution: true
+      
+      rate_limiting:
+        default_limit: 1000
+        route_limits: {}
+        storage:
+          type: "Memory"
+      
+      cors:
+        allowed_origins: ["*"]
+        allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+        allowed_headers: ["Content-Type", "Authorization"]
+        max_age: 3600
+
+    auth:
+      jwt:
+        secret_from_env: "JWT_SECRET"
+        algorithm: "HS256"
+        expiration: "1h"
+      
+      api_key:
+        header_name: "X-API-Key"
+        keys: {}
+
+    observability:
+      metrics:
+        prometheus_enabled: true
+        endpoint_path: "/metrics"
+        custom_metrics: []
+      
+      logging:
+        level: "info"
+        format: "json"
+        output:
+          type: "Stdout"
+      
+      tracing:
+        enabled: true
+        backend:
+          type: "Jaeger"
+          endpoint: "http://jaeger-collector:14268/api/traces"
+        sampling_rate: 0.1
+
+    service_discovery:
+      kubernetes:
+        default_namespace: "default"
+        watch_all_namespaces: false
+
+    cache:
+      enabled: true
+      in_memory:
+        enabled: true
+        max_entries: 10000
+        max_memory_mb: 100
+        cleanup_interval: "60s"
+      redis:
+        enabled: true
+        url: "redis://redis-service:6379"
+        pool_size: 10
+        connection_timeout: "5s"
+        key_prefix: "gateway:cache:"
+        cluster_mode: false
+      default_ttl: "5m"
+      global_policy:
+        enabled: true
+        ttl: "5m"
+        cacheable_methods: ["GET", "HEAD"]
+        cacheable_status_codes: [200, 203, 204, 206, 300, 301, 404, 405, 410, 414, 501]
+        vary_headers: ["Accept", "Accept-Encoding"]
+        cache_authenticated: false
+        max_response_size: 1048576  # 1MB
+        key_strategy:
+          type: "WithQuery"
+        enable_deduplication: true
+        enable_idempotency: false
+      policies:
+        "/api/v1/users":
+          enabled: true
+          ttl: "10m"
+          cacheable_methods: ["GET"]
+          cacheable_status_codes: [200]
+          vary_headers: ["Accept", "Authorization"]
+          cache_authenticated: true
+          max_response_size: 2097152  # 2MB
+          key_strategy:
+            type: "WithUser"
+          enable_deduplication: true
+          enable_idempotency: false

@@ -44,6 +44,7 @@ pub mod transformation;
 pub mod grpc_management;
 pub mod websocket_management;
 pub mod http_management;
+pub mod k8s_management;
 pub mod metrics;
 pub mod logging;
 pub mod tracing;
@@ -97,6 +98,11 @@ pub use compliance::{
 pub use backup_recovery::{
     BackupRecoveryState, create_backup_recovery_router, BackupRecoveryManager, BackupRecord,
     RecoveryPlan, BackupType, RestoreType, RecoveryExecution
+};
+pub use k8s_management::{
+    K8sResourceManager, K8sResourceOperations, K8sAdvancedOperations, K8sResourceInfo, 
+    ScalingRequest, HPAConfig, PodMetrics, IngressConfig, IngressRule, IngressPath,
+    ClusterInfo, NodeMetrics, NodeCondition, DeploymentRevision
 };
 
 // Re-export cache admin from caching module

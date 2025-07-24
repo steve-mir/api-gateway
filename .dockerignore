@@ -1,0 +1,56 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Rust build artifacts (except what we need)
+target/debug/
+target/doc/
+target/tmp/
+
+# Test files
+tests/
+benches/
+examples/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Kubernetes
+k8s/
+*.yaml
+!config/*.yaml
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+
+# Node modules (if any)
+node_modules/
+
+# Admin dashboard build artifacts
+admin-dashboard/node_modules/
+admin-dashboard/dist/
+admin-dashboard/build/
