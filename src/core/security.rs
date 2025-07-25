@@ -14,8 +14,9 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::{DateTime, Duration, Utc};
 use dashmap::DashMap;
 use regex::Regex;
-use rustls::{Certificate, PrivateKey, ServerConfig};
+use rustls::{ServerConfig};
 use rustls_pemfile::{certs, pkcs8_private_keys};
+use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -116,27 +117,25 @@ impl TlsManager {
         let mut key_reader = BufReader::new(key_file);
 
         // Parse certificates
-        let cert_chain = certs(&mut cert_reader)
-            .map_err(|e| GatewayError::config(format!("Failed to parse certificates: {}", e)))?
-            .into_iter()
-            .map(Certificate)
-            .collect();
+        let cert_chain: Vec<_> = certs(&mut cert_reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| GatewayError::config(format!("Failed to parse certificates: {}", e)))?;
 
         // Parse private key
-        let mut keys = pkcs8_private_keys(&mut key_reader)
+        let mut keys: Vec<_> = pkcs8_private_keys(&mut key_reader)
+            .collect::<Result<Vec<_>, _>>()
             .map_err(|e| GatewayError::config(format!("Failed to parse private key: {}", e)))?;
 
         if keys.is_empty() {
             return Err(GatewayError::config("No private key found"));
         }
 
-        let private_key = PrivateKey(keys.remove(0));
+        let private_key = keys.remove(0);
 
         // Build TLS server configuration
         let config = ServerConfig::builder()
-            .with_safe_defaults()
             .with_no_client_auth()
-            .with_single_cert(cert_chain, private_key)
+            .with_single_cert(cert_chain, private_key.into())
             .map_err(|e| GatewayError::config(format!("Failed to build TLS config: {}", e)))?;
 
         // Store the configuration
@@ -159,7 +158,7 @@ impl TlsManager {
     }
 
     /// Validate certificate chain
-    pub async fn validate_certificate_chain(&self, chain: &[Certificate]) -> GatewayResult<bool> {
+    pub async fn validate_certificate_chain(&self, chain: &[rustls::pki_types::CertificateDer<'_>]) -> GatewayResult<bool> {
         // Implementation would validate the certificate chain
         // This is a simplified version
         if chain.is_empty() {
@@ -185,8 +184,9 @@ impl TlsManager {
             chain: vec!["cert1".to_string(), "cert2".to_string()],
         })
     }
-}// ===
-=========================================================================
+}
+
+// ============================================================================
 // Request Signing and Verification
 // ============================================================================
 
@@ -466,8 +466,9 @@ impl RequestSigner {
         // ECDSA verification implementation would go here
         Ok(true) // Placeholder
     }
-}// ======
-======================================================================
+}
+
+// ============================================================================
 // Security Headers Injection
 // ============================================================================
 
@@ -653,7 +654,7 @@ impl SecurityHeaders {
         // Custom headers
         for (name, value) in &self.config.custom_headers {
             headers.insert(
-                HeaderName::from_str(name)
+                name.parse::<HeaderName>()
                     .map_err(|e| GatewayError::internal(format!("Invalid header name: {}", e)))?,
                 HeaderValue::from_str(value)
                     .map_err(|e| GatewayError::internal(format!("Invalid header value: {}", e)))?,
@@ -683,8 +684,9 @@ impl SecurityHeaders {
             custom_headers: HashMap::new(),
         }
     }
-}/
-/ ============================================================================
+}
+
+// ============================================================================
 // Input Validation and Sanitization
 // ============================================================================
 
@@ -823,7 +825,7 @@ impl InputValidator {
 
         Ok(ValidationResult {
             valid: errors.is_empty(),
-            errors,
+            errors: errors.clone(),
             sanitized_value: if errors.is_empty() { Some(sanitized) } else { None },
         })
     }
@@ -955,7 +957,7 @@ impl InputValidator {
             serde_json::Value::Object(obj) => {
                 let mut sanitized_obj = serde_json::Map::new();
                 for (key, val) in obj {
-                    let sanitized_val = self.sanitize_value(val, _context).await?;
+                    let sanitized_val = Box::pin(self.sanitize_value(val, _context)).await?;
                     sanitized_obj.insert(key.clone(), sanitized_val);
                 }
                 Ok(serde_json::Value::Object(sanitized_obj))
@@ -963,7 +965,7 @@ impl InputValidator {
             serde_json::Value::Array(arr) => {
                 let mut sanitized_arr = Vec::new();
                 for val in arr {
-                    let sanitized_val = self.sanitize_value(val, _context).await?;
+                    let sanitized_val = Box::pin(self.sanitize_value(val, _context)).await?;
                     sanitized_arr.push(sanitized_val);
                 }
                 Ok(serde_json::Value::Array(sanitized_arr))
@@ -973,7 +975,7 @@ impl InputValidator {
     }
 
     /// Get field value from JSON using path
-    fn get_field_value(&self, value: &serde_json::Value, path: &str) -> Option<&serde_json::Value> {
+    fn get_field_value<'a>(&self, value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
         let parts: Vec<&str> = path.split('.').collect();
         let mut current = value;
         
@@ -1063,7 +1065,7 @@ impl InputValidator {
         let script_regex = Regex::new(r"(?i)<script[^>]*>.*?</script>").unwrap();
         let mut sanitized = script_regex.replace_all(input, "").to_string();
         
-        let dangerous_attrs = Regex::new(r"(?i)\s+(on\w+|javascript:|data:)\s*=\s*['\"][^'\"]*['\"]").unwrap();
+        let dangerous_attrs = Regex::new(r#"(?i)\s+(on\w+|javascript:|data:)\s*=\s*['"][^'"]*['"]"#).unwrap();
         sanitized = dangerous_attrs.replace_all(&sanitized, "").to_string();
         
         sanitized
@@ -1096,8 +1098,9 @@ impl InputValidator {
             .replace("%2e%2e%2f", "")
             .replace("%2e%2e%5c", "")
     }
-}/
-/ ============================================================================
+}
+
+// ============================================================================
 // Security Audit Logging
 // ============================================================================
 
@@ -1337,8 +1340,9 @@ impl SecurityAuditor {
         info!("Audit entry: {:?}", entry);
         Ok(())
     }
-}// 
-============================================================================
+}
+
+// ============================================================================
 // Threat Detection and Security Monitoring
 // ============================================================================
 

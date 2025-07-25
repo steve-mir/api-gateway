@@ -1,0 +1,558 @@
+# Production Best Practices Configuration
+# This configuration demonstrates production-ready settings with security,
+# performance, and reliability optimizations
+
+# =============================================================================
+# SERVER CONFIGURATION - Production Optimized
+# =============================================================================
+server:
+  # Use standard ports for production
+  http_port: 8080
+  https_port: 8443
+  metrics_port: 9090
+  bind_address: "0.0.0.0"
+  
+  # Production timeouts - balance between user experience and resource usage
+  timeouts:
+    request_timeout: "30s"      # Maximum time for complete request processing
+    keepalive_timeout: "75s"    # HTTP keep-alive timeout (slightly longer than load balancer)
+    upstream_timeout: "25s"     # Upstream service timeout (shorter than request_timeout)
+    idle_timeout: "60s"         # Connection idle timeout
+    read_timeout: "30s"         # Socket read timeout
+    write_timeout: "30s"        # Socket write timeout
+  
+  # Resource limits for production
+  max_request_size: 52428800    # 50MB - adjust based on your use case
+  max_connections: 10000        # Maximum concurrent connections
+  worker_threads: 0             # Use all available CPU cores
+  connection_pool_size: 100     # HTTP client connection pool size
+  
+  # Performance optimizations
+  tcp_nodelay: true             # Disable Nagle's algorithm for lower latency
+  tcp_keepalive: true           # Enable TCP keepalive
+  so_reuseport: true           # Enable SO_REUSEPORT for better load distribution
+  
+  # Security settings
+  hide_server_header: true      # Don't expose server information
+  disable_server_tokens: true   # Don't expose version information
+  max_header_size: 8192        # Limit header size to prevent attacks
+  max_uri_length: 2048         # Limit URI length
+
+# =============================================================================
+# TLS/SSL CONFIGURATION - Production Security
+# =============================================================================
+tls:
+  enabled: true
+  cert_file: "/etc/gateway/tls/tls.crt"
+  key_file: "/etc/gateway/tls/tls.key"
+  ca_file: "/etc/gateway/tls/ca.crt"
+  
+  # Use modern TLS versions only
+  min_version: "1.2"
+  max_version: "1.3"
+  
+  # Strong cipher suites (TLS 1.3 preferred)
+  cipher_suites:
+    - "TLS_AES_256_GCM_SHA384"
+    - "TLS_CHACHA20_POLY1305_SHA256"
+    - "TLS_AES_128_GCM_SHA256"
+    - "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
+    - "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
+  
+  # Optional client certificate authentication
+  client_auth: "request"        # Options: none, request, require
+  
+  # OCSP stapling for certificate validation
+  ocsp_stapling: true
+  
+  # Session resumption for performance
+  session_cache_size: 1000
+  session_timeout: "300s"
+
+# =============================================================================
+# AUTHENTICATION - Production Security
+# =============================================================================
+auth:
+  # JWT Configuration with RSA (more secure than HMAC for distributed systems)
+  jwt:
+    algorithm: "RS256"                    # Use RSA for production
+    public_key_url: "https://auth.example.com/.well-known/jwks.json"
+    private_key_file: "/etc/gateway/keys/jwt-private.pem"
+    public_key_file: "/etc/gateway/keys/jwt-public.pem"
+    expiration: "1h"                      # Token lifetime
+    refresh_threshold: "15m"              # Refresh tokens before expiry
+    issuer: "https://auth.example.com"    # Token issuer
+    audience: "api-gateway"               # Token audience
+    leeway: "30s"                        # Clock skew tolerance
+    
+    # Token validation settings
+    validate_expiry: true
+    validate_not_before: true
+    validate_issuer: true
+    validate_audience: true
+    
+    # Caching for performance
+    cache_public_keys: true
+    key_cache_ttl: "1h"
+    key_refresh_interval: "30m"
+
+  # OAuth2/OpenID Connect
+  oauth2:
+    provider_url: "https://auth.example.com"
+    client_id: "${OAUTH2_CLIENT_ID}"      # Use environment variables
+    client_secret: "${OAUTH2_CLIENT_SECRET}"
+    scopes: ["openid", "profile", "email"]
+    token_endpoint: "https://auth.example.com/oauth/token"
+    userinfo_endpoint: "https://auth.example.com/oauth/userinfo"
+    jwks_endpoint: "https://auth.example.com/.well-known/jwks.json"
+    
+    # Security settings
+    state_parameter: true                 # CSRF protection
+    pkce: true                           # Proof Key for Code Exchange
+    nonce: true                          # Replay attack protection
+
+  # API Key Authentication
+  api_key:
+    header_name: "X-API-Key"
+    query_param: "api_key"               # Alternative parameter name
+    storage:
+      type: "Redis"                      # Distributed storage for scaling
+      redis_url: "${REDIS_URL}"
+      key_prefix: "gateway:apikeys:"
+      ttl: "24h"                        # Key cache TTL
+    
+    # Rate limiting per API key
+    rate_limiting:
+      enabled: true
+      default_limit: 1000
+      window: "1h"
+
+# =============================================================================
+# RATE LIMITING - Production Traffic Management
+# =============================================================================
+middleware:
+  rate_limiting:
+    # Global rate limiting
+    global:
+      enabled: true
+      limit: 10000                       # Requests per window
+      window: "1m"                       # Time window
+      burst_limit: 15000                 # Burst capacity
+      storage: "Redis"                   # Distributed storage
+    
+    # Per-user rate limiting
+    per_user:
+      enabled: true
+      limit: 1000
+      window: "1m"
+      burst_limit: 1500
+      key_extractor: "jwt_subject"       # Extract from JWT subject
+    
+    # Per-IP rate limiting (DDoS protection)
+    per_ip:
+      enabled: true
+      limit: 100
+      window: "1m"
+      burst_limit: 200
+      key_extractor: "client_ip"
+      whitelist:                         # Trusted IPs
+        - "10.0.0.0/8"
+        - "172.16.0.0/12"
+        - "192.168.0.0/16"
+    
+    # Route-specific limits
+    route_limits:
+      "/api/v1/auth/login": 10           # Login endpoint
+      "/api/v1/auth/register": 5         # Registration endpoint
+      "/api/v1/admin/*": 100             # Admin endpoints
+      "/api/v1/public/*": 1000           # Public endpoints
+    
+    # Storage configuration
+    storage:
+      type: "Redis"
+      redis_url: "${REDIS_CLUSTER_URL}"
+      key_prefix: "gateway:ratelimit:"
+      pool_size: 50
+      connection_timeout: "5s"
+      cluster_mode: true
+
+# =============================================================================
+# CACHING - Production Performance
+# =============================================================================
+cache:
+  enabled: true
+  
+  # Multi-tier caching strategy
+  tiers:
+    # L1: In-memory cache (fastest)
+    memory:
+      enabled: true
+      max_entries: 100000
+      max_memory_mb: 1024               # 1GB memory cache
+      cleanup_interval: "300s"          # 5 minutes
+      eviction_policy: "LRU"
+    
+    # L2: Redis cache (distributed)
+    redis:
+      enabled: true
+      cluster_mode: true
+      urls:
+        - "${REDIS_CLUSTER_NODE_1}"
+        - "${REDIS_CLUSTER_NODE_2}"
+        - "${REDIS_CLUSTER_NODE_3}"
+      pool_size: 100
+      connection_timeout: "5s"
+      key_prefix: "gateway:cache:"
+      compression: true                  # Compress large responses
+      compression_threshold: 1024        # Compress responses > 1KB
+  
+  # Default caching policy
+  default_policy:
+    ttl: "300s"                         # 5 minutes default TTL
+    cacheable_methods: ["GET", "HEAD"]
+    cacheable_status_codes: [200, 203, 204, 206, 300, 301, 404, 410]
+    vary_headers: ["Accept", "Accept-Encoding"]
+    cache_authenticated: false          # Don't cache authenticated requests by default
+    max_response_size: 1048576         # 1MB max cached response
+    
+    # Cache key strategy
+    key_strategy:
+      type: "WithQuery"                 # Include query parameters in key
+      include_headers: ["Accept", "Accept-Language"]
+      exclude_headers: ["Authorization", "Cookie"]
+    
+    # Advanced features
+    enable_deduplication: true          # Prevent duplicate requests
+    enable_idempotency: true           # Idempotent request handling
+    stale_while_revalidate: "60s"      # Serve stale content while refreshing
+    stale_if_error: "300s"             # Serve stale content on upstream errors
+
+# =============================================================================
+# OBSERVABILITY - Production Monitoring
+# =============================================================================
+observability:
+  # Metrics configuration
+  metrics:
+    prometheus_enabled: true
+    endpoint_path: "/metrics"
+    
+    # Push gateway for batch jobs
+    push_gateway:
+      enabled: true
+      url: "http://prometheus-pushgateway:9091"
+      interval: "30s"
+      job_name: "api-gateway"
+    
+    # Custom metrics
+    custom_metrics:
+      - name: "gateway_business_transactions_total"
+        type: "counter"
+        help: "Total business transactions processed"
+        labels: ["service", "operation", "status", "user_tier"]
+      
+      - name: "gateway_cache_hit_ratio"
+        type: "gauge"
+        help: "Cache hit ratio percentage"
+        labels: ["cache_tier", "route"]
+      
+      - name: "gateway_upstream_response_time_seconds"
+        type: "histogram"
+        help: "Upstream service response time"
+        labels: ["service", "method", "status"]
+        buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+    
+    # Resource metrics
+    resource_metrics:
+      enabled: true
+      collect_interval: "15s"
+      include_system_metrics: true
+      include_process_metrics: true
+      include_go_metrics: false          # We're using Rust, not Go
+
+  # Structured logging
+  logging:
+    level: "info"                       # Production log level
+    format: "json"                      # Structured logging for parsing
+    
+    # Output configuration
+    output:
+      type: "File"
+      path: "/var/log/gateway/gateway.log"
+      max_size: "100MB"
+      max_files: 10
+      compress: true
+      rotation: "daily"
+    
+    # Log sampling for high-traffic scenarios
+    sampling:
+      enabled: true
+      rate: 0.1                        # Sample 10% of requests
+      burst: 100                       # Always log first 100 requests
+    
+    # Correlation and tracing
+    correlation_id_header: "X-Correlation-ID"
+    trace_id_header: "X-Trace-ID"
+    
+    # Security - exclude sensitive data
+    excluded_headers:
+      - "authorization"
+      - "cookie"
+      - "x-api-key"
+      - "x-forwarded-for"
+    
+    # Performance - don't log request/response bodies by default
+    log_request_body: false
+    log_response_body: false
+    max_body_log_size: 0
+
+  # Distributed tracing
+  tracing:
+    enabled: true
+    
+    # OpenTelemetry configuration
+    backend:
+      type: "OTLP"
+      endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
+      headers:
+        Authorization: "Bearer ${TRACING_TOKEN}"
+    
+    # Sampling configuration
+    sampling:
+      type: "TraceIdRatioBased"
+      ratio: 0.01                       # 1% sampling for production
+    
+    # Service information
+    service_name: "api-gateway"
+    service_version: "${APP_VERSION}"
+    service_namespace: "${ENVIRONMENT}"
+    
+    # Resource attributes
+    resource_attributes:
+      environment: "${ENVIRONMENT}"
+      region: "${AWS_REGION}"
+      availability_zone: "${AWS_AZ}"
+      kubernetes_cluster: "${K8S_CLUSTER_NAME}"
+      kubernetes_namespace: "${K8S_NAMESPACE}"
+      kubernetes_pod: "${K8S_POD_NAME}"
+
+# =============================================================================
+# SERVICE DISCOVERY - Production Service Mesh
+# =============================================================================
+service_discovery:
+  # Kubernetes service discovery
+  kubernetes:
+    enabled: true
+    default_namespace: "${K8S_NAMESPACE}"
+    watch_all_namespaces: false
+    kubeconfig_path: "/var/run/secrets/kubernetes.io/serviceaccount"
+    resync_interval: "30s"
+    
+    # Service filtering
+    label_selector: "app.kubernetes.io/component=backend"
+    annotation_selector: "gateway.example.com/enabled=true"
+    
+    # Service endpoint configuration
+    port_name: "http"                   # Default port name to use
+    scheme: "http"                      # Default scheme
+    
+    # Health checking
+    health_check_path: "/health"
+    health_check_interval: "30s"
+    health_check_timeout: "5s"
+  
+  # Consul service discovery (alternative/additional)
+  consul:
+    enabled: false
+    address: "${CONSUL_ADDRESS}"
+    datacenter: "${CONSUL_DATACENTER}"
+    token: "${CONSUL_TOKEN}"
+    
+    # Service filtering
+    service_tags: ["gateway-backend"]
+    health_check: true
+    only_passing: true
+
+# =============================================================================
+# UPSTREAM CONFIGURATION - Production Reliability
+# =============================================================================
+upstreams:
+  # Default upstream configuration
+  defaults:
+    # Load balancing
+    load_balancer:
+      type: "LeastConnections"          # Best for production
+      health_check_interval: "10s"
+      connection_timeout: "5s"
+      max_connections_per_host: 100
+    
+    # Health checking
+    health_check:
+      enabled: true
+      path: "/health"
+      interval: "15s"
+      timeout: "5s"
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+      expected_status: [200, 204]
+      expected_body: ""                 # Optional body check
+    
+    # Circuit breaker
+    circuit_breaker:
+      enabled: true
+      failure_threshold: 5              # Open after 5 failures
+      timeout: "60s"                    # Stay open for 60 seconds
+      success_threshold: 3              # Close after 3 successes
+      half_open_max_requests: 10        # Max requests in half-open state
+    
+    # Retry policy
+    retry_policy:
+      enabled: true
+      max_retries: 3
+      retry_timeout: "30s"
+      backoff_strategy: "ExponentialBackoff"
+      initial_delay: "100ms"
+      max_delay: "5s"
+      multiplier: 2.0
+      jitter: true
+      
+      # Retry conditions
+      retry_on_status: [502, 503, 504]
+      retry_on_timeout: true
+      retry_on_connection_error: true
+    
+    # Connection pooling
+    connection_pool:
+      max_idle_connections: 50
+      max_idle_connections_per_host: 10
+      idle_timeout: "90s"
+      max_lifetime: "300s"
+
+# =============================================================================
+# SECURITY HEADERS - Production Security
+# =============================================================================
+middleware:
+  security_headers:
+    enabled: true
+    
+    # Core security headers
+    headers:
+      # Prevent clickjacking
+      X-Frame-Options: "DENY"
+      
+      # Prevent MIME type sniffing
+      X-Content-Type-Options: "nosniff"
+      
+      # XSS protection
+      X-XSS-Protection: "1; mode=block"
+      
+      # HSTS (HTTP Strict Transport Security)
+      Strict-Transport-Security: "max-age=31536000; includeSubDomains; preload"
+      
+      # Content Security Policy
+      Content-Security-Policy: >
+        default-src 'self';
+        script-src 'self' 'unsafe-inline' https://cdn.example.com;
+        style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+        font-src 'self' https://fonts.gstatic.com;
+        img-src 'self' data: https:;
+        connect-src 'self' https://api.example.com;
+        frame-ancestors 'none';
+        base-uri 'self';
+        form-action 'self'
+      
+      # Referrer Policy
+      Referrer-Policy: "strict-origin-when-cross-origin"
+      
+      # Permissions Policy (formerly Feature Policy)
+      Permissions-Policy: >
+        geolocation=(),
+        microphone=(),
+        camera=(),
+        payment=(),
+        usb=(),
+        magnetometer=(),
+        gyroscope=(),
+        speaker=()
+      
+      # Custom headers
+      X-Gateway-Version: "${APP_VERSION}"
+      X-Environment: "${ENVIRONMENT}"
+      X-Request-ID: "${REQUEST_ID}"
+    
+    # Remove server information
+    remove_headers:
+      - "Server"
+      - "X-Powered-By"
+      - "X-AspNet-Version"
+
+# =============================================================================
+# CORS - Production Cross-Origin Configuration
+# =============================================================================
+  cors:
+    enabled: true
+    
+    # Allowed origins (be specific in production)
+    allowed_origins:
+      - "https://app.example.com"
+      - "https://admin.example.com"
+      - "https://dashboard.example.com"
+    
+    # Allowed methods
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+    
+    # Allowed headers
+    allowed_headers:
+      - "Content-Type"
+      - "Authorization"
+      - "X-API-Key"
+      - "X-Requested-With"
+      - "X-Correlation-ID"
+    
+    # Exposed headers (visible to client)
+    exposed_headers:
+      - "X-Request-ID"
+      - "X-RateLimit-Remaining"
+      - "X-RateLimit-Reset"
+      - "X-Cache-Status"
+    
+    # Credentials and caching
+    allow_credentials: true
+    max_age: 86400                      # 24 hours preflight cache
+    
+    # Security options
+    vary_origin: true                   # Add Vary: Origin header
+    options_passthrough: false          # Handle OPTIONS requests
+
+# =============================================================================
+# ENVIRONMENT VARIABLES - Production Secrets Management
+# =============================================================================
+# The following environment variables should be set in production:
+#
+# Security:
+# - JWT_SECRET: JWT signing secret
+# - OAUTH2_CLIENT_ID: OAuth2 client ID
+# - OAUTH2_CLIENT_SECRET: OAuth2 client secret
+# - API_KEY_STORE: API key storage encryption key
+# - TRACING_TOKEN: Distributed tracing authentication token
+#
+# Infrastructure:
+# - REDIS_URL: Redis connection string
+# - REDIS_CLUSTER_URL: Redis cluster connection string
+# - REDIS_CLUSTER_NODE_1: Redis cluster node 1
+# - REDIS_CLUSTER_NODE_2: Redis cluster node 2
+# - REDIS_CLUSTER_NODE_3: Redis cluster node 3
+# - CONSUL_ADDRESS: Consul server address
+# - CONSUL_DATACENTER: Consul datacenter
+# - CONSUL_TOKEN: Consul access token
+#
+# Observability:
+# - OTEL_EXPORTER_OTLP_ENDPOINT: OpenTelemetry collector endpoint
+#
+# Application:
+# - APP_VERSION: Application version
+# - ENVIRONMENT: Environment name (production, staging, etc.)
+# - K8S_NAMESPACE: Kubernetes namespace
+# - K8S_CLUSTER_NAME: Kubernetes cluster name
+# - K8S_POD_NAME: Kubernetes pod name
+# - AWS_REGION: AWS region
+# - AWS_AZ: AWS availability zone

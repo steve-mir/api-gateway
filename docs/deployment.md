@@ -1,205 +1,165 @@
-# Deployment Guide
+# API Gateway Deployment Guide
 
-This guide covers various deployment strategies for the Rust API Gateway, from local development to production Kubernetes clusters.
+This guide provides comprehensive instructions for deploying the Rust API Gateway in production and staging environments.
 
 ## Table of Contents
 
-- [Local Development](#local-development)
-- [Docker Deployment](#docker-deployment)
-- [Kubernetes Deployment](#kubernetes-deployment)
-- [Production Considerations](#production-considerations)
-- [Monitoring and Observability](#monitoring-and-observability)
-- [Security Configuration](#security-configuration)
-- [Performance Tuning](#performance-tuning)
-- [Backup and Recovery](#backup-and-recovery)
+1. [Prerequisites](#prerequisites)
+2. [Configuration Management](#configuration-management)
+3. [Container Deployment](#container-deployment)
+4. [Kubernetes Deployment](#kubernetes-deployment)
+5. [Production Best Practices](#production-best-practices)
+6. [Monitoring and Observability](#monitoring-and-observability)
+7. [Disaster Recovery](#disaster-recovery)
+8. [Troubleshooting](#troubleshooting)
 
-## Local Development
+## Prerequisites
 
-### Prerequisites
+### System Requirements
 
-- Rust 1.75 or later
-- Docker (optional)
-- kubectl (for Kubernetes development)
+**Minimum Requirements:**
+- CPU: 2 cores
+- Memory: 2GB RAM
+- Storage: 10GB available space
+- Network: 1Gbps network interface
 
-### Building from Source
+**Recommended for Production:**
+- CPU: 4+ cores
+- Memory: 8GB+ RAM
+- Storage: 50GB+ SSD
+- Network: 10Gbps network interface
 
-```bash
-# Clone the repository
-git clone https://github.com/your-org/rust-api-gateway.git
-cd rust-api-gateway
+### Dependencies
 
-# Build in debug mode for development
-cargo build
+- **Kubernetes**: v1.24+ (for Kubernetes deployment)
+- **Docker**: v20.10+ (for container deployment)
+- **Redis**: v6.0+ (for distributed caching and rate limiting)
+- **PostgreSQL**: v13+ (for persistent storage, if needed)
+- **Prometheus**: v2.30+ (for metrics collection)
+- **Jaeger**: v1.35+ (for distributed tracing)
 
-# Build optimized release version
-cargo build --release
+## Configuration Management
 
-# Run tests
-cargo test
+### Environment-Specific Configurations
 
-# Run with custom configuration
-cargo run -- --config config/development.yaml
-```
-
-### Development Configuration
-
-Create a `config/development.yaml` file:
-
-```yaml
-server:
-  bind_address: "127.0.0.1"
-  http_port: 8080
-  admin_port: 8081
-  request_timeout: 30
-
-routes:
-  - path: "/api/users"
-    upstream: "user-service"
-    methods: ["GET", "POST", "PUT", "DELETE"]
-
-upstreams:
-  user-service:
-    discovery:
-      type: "static"
-      endpoints:
-        - "http://localhost:3001"
-    health_check:
-      enabled: true
-      path: "/health"
-
-observability:
-  logging:
-    level: "debug"
-    format: "text"
-  metrics:
-    enabled: true
-    prometheus:
-      enabled: true
-      port: 9090
-```
-
-### Hot Reloading
-
-The gateway supports hot configuration reloading:
+The gateway supports multiple configuration files for different environments:
 
 ```bash
-# Start with file watching enabled
-RUST_LOG=info cargo run
-
-# In another terminal, modify the configuration
-vim config/gateway.yaml
-
-# The gateway will automatically reload the configuration
+config/
+├── gateway.yaml          # Development configuration
+├── staging.yaml          # Staging configuration
+├── production.yaml       # Production configuration
+└── microservices-example.yaml  # Example microservices setup
 ```
 
-## Docker Deployment
+### Configuration Loading Priority
 
-### Building Docker Image
+1. Command line arguments: `--config /path/to/config.yaml`
+2. Environment variable: `GATEWAY_CONFIG_PATH`
+3. Default: `config/gateway.yaml`
 
-```dockerfile
-# Multi-stage build for optimal image size
-FROM rust:1.75-slim as builder
+### Environment Variables
 
-WORKDIR /app
-
-# Copy dependency files first for better caching
-COPY Cargo.toml Cargo.lock ./
-COPY src ./src
-
-# Build the application
-RUN cargo build --release
-
-# Runtime stage
-FROM debian:bookworm-slim
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user
-RUN useradd -r -s /bin/false -m gateway
-
-# Copy binary and configuration
-COPY --from=builder /app/target/release/api-gateway /usr/local/bin/
-COPY config/ /etc/gateway/
-COPY k8s/configmap.yaml /etc/gateway/
-
-# Set ownership
-RUN chown -R gateway:gateway /etc/gateway
-
-USER gateway
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8080/health || exit 1
-
-EXPOSE 8080 8081 9090
-
-ENTRYPOINT ["/usr/local/bin/api-gateway"]
-CMD ["--config", "/etc/gateway/gateway.yaml"]
-```
-
-### Building and Running
+Critical environment variables for production:
 
 ```bash
-# Build the Docker image
-docker build -t rust-api-gateway:latest .
+# Configuration
+export GATEWAY_CONFIG_PATH="/etc/gateway/production.yaml"
 
-# Run with basic configuration
+# Security
+export JWT_SECRET="your-production-jwt-secret"
+export OAUTH2_CLIENT_ID="your-oauth2-client-id"
+export OAUTH2_CLIENT_SECRET="your-oauth2-client-secret"
+export TRACING_TOKEN="your-tracing-auth-token"
+
+# Database connections
+export REDIS_URL="redis://redis-cluster:6379"
+export DATABASE_URL="postgresql://user:pass@db:5432/gateway"
+
+# TLS certificates
+export TLS_CERT_PATH="/etc/ssl/certs/gateway.crt"
+export TLS_KEY_PATH="/etc/ssl/private/gateway.key"
+export TLS_CA_PATH="/etc/ssl/certs/ca.crt"
+```
+
+## Container Deployment
+
+### Building the Container
+
+```bash
+# Build the production image
+docker build -t api-gateway:latest .
+
+# Build with specific version tag
+docker build -t api-gateway:v1.0.0 .
+
+# Multi-architecture build
+docker buildx build --platform linux/amd64,linux/arm64 -t api-gateway:v1.0.0 .
+```
+
+### Running with Docker
+
+```bash
+# Basic run
 docker run -d \
   --name api-gateway \
   -p 8080:8080 \
-  -p 8081:8081 \
+  -p 8443:8443 \
   -p 9090:9090 \
-  rust-api-gateway:latest
+  -v $(pwd)/config:/etc/gateway/config \
+  api-gateway:latest
 
-# Run with custom configuration
+# Production run with environment variables
 docker run -d \
   --name api-gateway \
+  --restart unless-stopped \
   -p 8080:8080 \
-  -p 8081:8081 \
+  -p 8443:8443 \
   -p 9090:9090 \
-  -v $(pwd)/config:/etc/gateway \
-  rust-api-gateway:latest
-
-# Check logs
-docker logs -f api-gateway
-
-# Check health
-curl http://localhost:8080/health
+  -e GATEWAY_CONFIG_PATH="/etc/gateway/config/production.yaml" \
+  -e JWT_SECRET="${JWT_SECRET}" \
+  -e REDIS_URL="${REDIS_URL}" \
+  -v $(pwd)/config:/etc/gateway/config:ro \
+  -v $(pwd)/certs:/etc/ssl/certs:ro \
+  -v $(pwd)/logs:/var/log/gateway \
+  --memory=2g \
+  --cpus=2 \
+  api-gateway:latest
 ```
 
 ### Docker Compose
 
-Create a `docker-compose.yml` file:
-
 ```yaml
+# docker-compose.prod.yml
 version: '3.8'
 
 services:
   api-gateway:
-    build: .
+    image: api-gateway:latest
     ports:
       - "8080:8080"
-      - "8081:8081"
+      - "8443:8443"
       - "9090:9090"
-    volumes:
-      - ./config:/etc/gateway
-      - ./logs:/var/log/gateway
     environment:
-      - RUST_LOG=info
-      - GATEWAY_REDIS_URL=redis://redis:6379
+      - GATEWAY_CONFIG_PATH=/etc/gateway/config/production.yaml
+      - JWT_SECRET=${JWT_SECRET}
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./config:/etc/gateway/config:ro
+      - ./certs:/etc/ssl/certs:ro
+      - ./logs:/var/log/gateway
     depends_on:
       - redis
-      - user-service
+      - prometheus
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1G
+          cpus: '1'
 
   redis:
     image: redis:7-alpine
@@ -209,786 +169,464 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
-  user-service:
-    image: your-org/user-service:latest
-    ports:
-      - "3001:3001"
-    environment:
-      - DATABASE_URL=postgresql://user:pass@postgres:5432/users
-    depends_on:
-      - postgres
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_DB=users
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=pass
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
-
   prometheus:
     image: prom/prometheus:latest
     ports:
       - "9091:9090"
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-    restart: unless-stopped
-
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
     restart: unless-stopped
 
 volumes:
   redis_data:
-  postgres_data:
   prometheus_data:
-  grafana_data:
-```
-
-Start the stack:
-
-```bash
-docker-compose up -d
 ```
 
 ## Kubernetes Deployment
 
-### Namespace
+### Namespace Setup
 
-```yaml
-# k8s/namespace.yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: api-gateway
-  labels:
-    name: api-gateway
+```bash
+# Create namespace
+kubectl create namespace api-gateway-prod
+
+# Set as default namespace
+kubectl config set-context --current --namespace=api-gateway-prod
 ```
 
-### ConfigMap
+### ConfigMap and Secrets
 
-```yaml
-# k8s/configmap.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: gateway-config
-  namespace: api-gateway
-data:
-  gateway.yaml: |
-    server:
-      bind_address: "0.0.0.0"
-      http_port: 8080
-      admin_port: 8081
-      max_connections: 10000
-      request_timeout: 30
+```bash
+# Create ConfigMap from production config
+kubectl create configmap gateway-config \
+  --from-file=config/production.yaml \
+  --namespace=api-gateway-prod
 
-    routes:
-      - path: "/api/users"
-        upstream: "user-service"
-        methods: ["GET", "POST", "PUT", "DELETE"]
-        middleware: ["auth", "rate_limit"]
+# Create secrets
+kubectl create secret generic gateway-secrets \
+  --from-literal=jwt-secret="${JWT_SECRET}" \
+  --from-literal=oauth2-client-id="${OAUTH2_CLIENT_ID}" \
+  --from-literal=oauth2-client-secret="${OAUTH2_CLIENT_SECRET}" \
+  --namespace=api-gateway-prod
 
-    upstreams:
-      user-service:
-        discovery:
-          type: "kubernetes"
-          namespace: "default"
-          service_name: "user-service"
-        load_balancer:
-          algorithm: "round_robin"
-        health_check:
-          enabled: true
-          path: "/health"
-          interval: 30
-
-    authentication:
-      jwt:
-        secret: "${JWT_SECRET}"
-        algorithms: ["HS256"]
-
-    rate_limiting:
-      enabled: true
-      storage:
-        type: "redis"
-        redis:
-          url: "${REDIS_URL}"
-
-    observability:
-      metrics:
-        enabled: true
-        prometheus:
-          enabled: true
-          port: 9090
-      logging:
-        level: "info"
-        format: "json"
-      tracing:
-        enabled: true
-        jaeger:
-          endpoint: "${JAEGER_ENDPOINT}"
-```
-
-### Secret
-
-```yaml
-# k8s/secret.yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: gateway-secrets
-  namespace: api-gateway
-type: Opaque
-data:
-  jwt-secret: <base64-encoded-jwt-secret>
-  redis-url: <base64-encoded-redis-url>
-  jaeger-endpoint: <base64-encoded-jaeger-endpoint>
-```
-
-### Service Account and RBAC
-
-```yaml
-# k8s/rbac.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: gateway-service-account
-  namespace: api-gateway
-
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: gateway-cluster-role
-rules:
-- apiGroups: [""]
-  resources: ["services", "endpoints"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: ["apps"]
-  resources: ["deployments"]
-  verbs: ["get", "list", "watch"]
-
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: gateway-cluster-role-binding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: gateway-cluster-role
-subjects:
-- kind: ServiceAccount
-  name: gateway-service-account
-  namespace: api-gateway
+# Create TLS secret
+kubectl create secret tls gateway-tls \
+  --cert=certs/gateway.crt \
+  --key=certs/gateway.key \
+  --namespace=api-gateway-prod
 ```
 
 ### Deployment
 
-```yaml
-# k8s/deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: api-gateway
-  namespace: api-gateway
-  labels:
-    app: api-gateway
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: api-gateway
-  template:
-    metadata:
-      labels:
-        app: api-gateway
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "9090"
-        prometheus.io/path: "/metrics"
-    spec:
-      serviceAccountName: gateway-service-account
-      containers:
-      - name: gateway
-        image: rust-api-gateway:latest
-        ports:
-        - containerPort: 8080
-          name: http
-          protocol: TCP
-        - containerPort: 8081
-          name: admin
-          protocol: TCP
-        - containerPort: 9090
-          name: metrics
-          protocol: TCP
-        env:
-        - name: JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: gateway-secrets
-              key: jwt-secret
-        - name: REDIS_URL
-          valueFrom:
-            secretKeyRef:
-              name: gateway-secrets
-              key: redis-url
-        - name: JAEGER_ENDPOINT
-          valueFrom:
-            secretKeyRef:
-              name: gateway-secrets
-              key: jaeger-endpoint
-        - name: RUST_LOG
-          value: "info"
-        volumeMounts:
-        - name: config
-          mountPath: /etc/gateway
-          readOnly: true
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "250m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
-        readinessProbe:
-          httpGet:
-            path: /ready
-            port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 3
-        securityContext:
-          allowPrivilegeEscalation: false
-          runAsNonRoot: true
-          runAsUser: 1000
-          capabilities:
-            drop:
-            - ALL
-      volumes:
-      - name: config
-        configMap:
-          name: gateway-config
-      securityContext:
-        fsGroup: 1000
-      terminationGracePeriodSeconds: 30
-```
-
-### Service
-
-```yaml
-# k8s/service.yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: api-gateway
-  namespace: api-gateway
-  labels:
-    app: api-gateway
-spec:
-  type: ClusterIP
-  ports:
-  - port: 8080
-    targetPort: 8080
-    protocol: TCP
-    name: http
-  - port: 8081
-    targetPort: 8081
-    protocol: TCP
-    name: admin
-  - port: 9090
-    targetPort: 9090
-    protocol: TCP
-    name: metrics
-  selector:
-    app: api-gateway
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: api-gateway-admin
-  namespace: api-gateway
-  labels:
-    app: api-gateway
-    component: admin
-spec:
-  type: ClusterIP
-  ports:
-  - port: 8081
-    targetPort: 8081
-    protocol: TCP
-    name: admin
-  selector:
-    app: api-gateway
-```
-
-### Ingress
-
-```yaml
-# k8s/ingress.yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: api-gateway-ingress
-  namespace: api-gateway
-  annotations:
-    kubernetes.io/ingress.class: "nginx"
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-spec:
-  tls:
-  - hosts:
-    - api.example.com
-    secretName: api-gateway-tls
-  rules:
-  - host: api.example.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: api-gateway
-            port:
-              number: 8080
-
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: api-gateway-admin-ingress
-  namespace: api-gateway
-  annotations:
-    kubernetes.io/ingress.class: "nginx"
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/auth-type: basic
-    nginx.ingress.kubernetes.io/auth-secret: admin-auth
-    nginx.ingress.kubernetes.io/auth-realm: "Admin Access Required"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-spec:
-  tls:
-  - hosts:
-    - admin.example.com
-    secretName: api-gateway-admin-tls
-  rules:
-  - host: admin.example.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: api-gateway-admin
-            port:
-              number: 8081
-```
-
-### Horizontal Pod Autoscaler
-
-```yaml
-# k8s/hpa.yaml
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: api-gateway-hpa
-  namespace: api-gateway
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: api-gateway
-  minReplicas: 3
-  maxReplicas: 20
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
-  - type: Resource
-    resource:
-      name: memory
-      target:
-        type: Utilization
-        averageUtilization: 80
-  behavior:
-    scaleDown:
-      stabilizationWindowSeconds: 300
-      policies:
-      - type: Percent
-        value: 10
-        periodSeconds: 60
-    scaleUp:
-      stabilizationWindowSeconds: 60
-      policies:
-      - type: Percent
-        value: 50
-        periodSeconds: 60
-```
-
-### Pod Disruption Budget
-
-```yaml
-# k8s/pdb.yaml
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: api-gateway-pdb
-  namespace: api-gateway
-spec:
-  minAvailable: 2
-  selector:
-    matchLabels:
-      app: api-gateway
-```
-
-### Network Policy
-
-```yaml
-# k8s/networkpolicy.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: api-gateway-network-policy
-  namespace: api-gateway
-spec:
-  podSelector:
-    matchLabels:
-      app: api-gateway
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          name: ingress-nginx
-    ports:
-    - protocol: TCP
-      port: 8080
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          name: monitoring
-    ports:
-    - protocol: TCP
-      port: 9090
-  egress:
-  - to: []
-    ports:
-    - protocol: TCP
-      port: 53
-    - protocol: UDP
-      port: 53
-  - to:
-    - namespaceSelector: {}
-    ports:
-    - protocol: TCP
-      port: 8080
-  - to: []
-    ports:
-    - protocol: TCP
-      port: 6379  # Redis
-    - protocol: TCP
-      port: 443   # HTTPS
-```
-
-### Deployment Commands
-
 ```bash
 # Apply all Kubernetes manifests
-kubectl apply -f k8s/
+kubectl apply -f k8s/ --namespace=api-gateway-prod
 
+# Or apply individually
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/configmap.yaml
+kubectl apply -f k8s/secret.yaml
+kubectl apply -f k8s/deployment.yaml
+kubectl apply -f k8s/service.yaml
+kubectl apply -f k8s/ingress.yaml
+kubectl apply -f k8s/hpa.yaml
+kubectl apply -f k8s/pdb.yaml
+```
+
+### Verification
+
+```bash
 # Check deployment status
-kubectl get pods -n api-gateway
-kubectl get services -n api-gateway
-kubectl get ingress -n api-gateway
+kubectl get deployments -n api-gateway-prod
+kubectl get pods -n api-gateway-prod
+kubectl get services -n api-gateway-prod
 
 # Check logs
-kubectl logs -f deployment/api-gateway -n api-gateway
+kubectl logs -f deployment/api-gateway -n api-gateway-prod
 
-# Scale deployment
-kubectl scale deployment api-gateway --replicas=5 -n api-gateway
-
-# Rolling update
-kubectl set image deployment/api-gateway gateway=rust-api-gateway:v1.1.0 -n api-gateway
-
-# Check rollout status
-kubectl rollout status deployment/api-gateway -n api-gateway
-
-# Rollback if needed
-kubectl rollout undo deployment/api-gateway -n api-gateway
+# Check health
+kubectl port-forward service/api-gateway 8080:8080 -n api-gateway-prod
+curl http://localhost:8080/health
 ```
 
-## Production Considerations
+## Production Best Practices
 
-### Resource Planning
+### Security
 
-```yaml
-# Production resource configuration
-resources:
-  requests:
-    memory: "512Mi"
-    cpu: "500m"
-  limits:
-    memory: "1Gi"
-    cpu: "1000m"
-```
+1. **TLS Configuration**
+   ```yaml
+   tls:
+     enabled: true
+     cert_file: "/etc/ssl/certs/gateway.crt"
+     key_file: "/etc/ssl/private/gateway.key"
+     min_version: "1.2"
+     cipher_suites:
+       - "TLS_AES_256_GCM_SHA384"
+       - "TLS_CHACHA20_POLY1305_SHA256"
+   ```
+
+2. **Network Security**
+   - Use network policies to restrict traffic
+   - Enable pod security policies
+   - Use service mesh for mTLS
+
+3. **Secrets Management**
+   - Use Kubernetes secrets or external secret managers
+   - Rotate secrets regularly
+   - Never store secrets in configuration files
+
+### Performance Optimization
+
+1. **Resource Limits**
+   ```yaml
+   resources:
+     requests:
+       memory: "1Gi"
+       cpu: "500m"
+     limits:
+       memory: "2Gi"
+       cpu: "1000m"
+   ```
+
+2. **Horizontal Pod Autoscaling**
+   ```yaml
+   apiVersion: autoscaling/v2
+   kind: HorizontalPodAutoscaler
+   metadata:
+     name: api-gateway-hpa
+   spec:
+     scaleTargetRef:
+       apiVersion: apps/v1
+       kind: Deployment
+       name: api-gateway
+     minReplicas: 3
+     maxReplicas: 20
+     metrics:
+     - type: Resource
+       resource:
+         name: cpu
+         target:
+           type: Utilization
+           averageUtilization: 70
+   ```
+
+3. **Pod Disruption Budget**
+   ```yaml
+   apiVersion: policy/v1
+   kind: PodDisruptionBudget
+   metadata:
+     name: api-gateway-pdb
+   spec:
+     minAvailable: 2
+     selector:
+       matchLabels:
+         app: api-gateway
+   ```
 
 ### High Availability
 
-1. **Multiple Replicas**: Run at least 3 replicas across different nodes
-2. **Pod Anti-Affinity**: Spread pods across availability zones
-3. **Health Checks**: Configure proper liveness and readiness probes
-4. **Graceful Shutdown**: Handle SIGTERM signals properly
+1. **Multi-Zone Deployment**
+   ```yaml
+   affinity:
+     podAntiAffinity:
+       preferredDuringSchedulingIgnoredDuringExecution:
+       - weight: 100
+         podAffinityTerm:
+           labelSelector:
+             matchExpressions:
+             - key: app
+               operator: In
+               values:
+               - api-gateway
+           topologyKey: kubernetes.io/zone
+   ```
 
-```yaml
-# Pod anti-affinity configuration
-affinity:
-  podAntiAffinity:
-    preferredDuringSchedulingIgnoredDuringExecution:
-    - weight: 100
-      podAffinityTerm:
-        labelSelector:
-          matchExpressions:
-          - key: app
-            operator: In
-            values:
-            - api-gateway
-        topologyKey: kubernetes.io/hostname
-```
+2. **Health Checks**
+   ```yaml
+   livenessProbe:
+     httpGet:
+       path: /health
+       port: 8080
+     initialDelaySeconds: 30
+     periodSeconds: 10
+     timeoutSeconds: 5
+     failureThreshold: 3
 
-### Load Balancing
-
-```yaml
-# Service configuration for load balancing
-spec:
-  type: LoadBalancer
-  sessionAffinity: None
-  externalTrafficPolicy: Local
-```
-
-### SSL/TLS Configuration
-
-```yaml
-# TLS configuration in gateway config
-server:
-  tls:
-    enabled: true
-    cert_file: "/etc/ssl/certs/gateway.crt"
-    key_file: "/etc/ssl/private/gateway.key"
-    min_version: "1.2"
-    cipher_suites:
-      - "TLS_AES_256_GCM_SHA384"
-      - "TLS_CHACHA20_POLY1305_SHA256"
-```
+   readinessProbe:
+     httpGet:
+       path: /ready
+       port: 8080
+     initialDelaySeconds: 5
+     periodSeconds: 5
+     timeoutSeconds: 3
+     failureThreshold: 3
+   ```
 
 ## Monitoring and Observability
 
-### Prometheus Configuration
+### Metrics Collection
 
-```yaml
-# monitoring/prometheus.yml
-global:
-  scrape_interval: 15s
+1. **Prometheus Configuration**
+   ```yaml
+   # prometheus.yml
+   global:
+     scrape_interval: 15s
 
-scrape_configs:
-  - job_name: 'api-gateway'
-    static_configs:
-      - targets: ['api-gateway:9090']
-    metrics_path: /metrics
-    scrape_interval: 15s
+   scrape_configs:
+   - job_name: 'api-gateway'
+     static_configs:
+     - targets: ['api-gateway:9090']
+     metrics_path: /metrics
+     scrape_interval: 15s
+   ```
 
-  - job_name: 'kubernetes-pods'
-    kubernetes_sd_configs:
-      - role: pod
-    relabel_configs:
-      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
-        action: keep
-        regex: true
-      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
-        action: replace
-        target_label: __metrics_path__
-        regex: (.+)
-```
-
-### Grafana Dashboard
-
-Create dashboards for:
-- Request rate and latency
-- Error rates by service
-- Circuit breaker status
-- Resource utilization
-- Service topology
+2. **Key Metrics to Monitor**
+   - Request rate (RPS)
+   - Response latency (P50, P95, P99)
+   - Error rate (4xx, 5xx)
+   - Upstream service health
+   - Circuit breaker state
+   - Rate limiting hits
+   - Memory and CPU usage
 
 ### Alerting Rules
 
 ```yaml
-# monitoring/alerts.yml
+# alerts.yml
 groups:
-  - name: api-gateway
-    rules:
-      - alert: HighErrorRate
-        expr: rate(gateway_requests_total{status=~"5.."}[5m]) > 0.1
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High error rate detected"
-          description: "Error rate is {{ $value }} errors per second"
+- name: api-gateway
+  rules:
+  - alert: HighErrorRate
+    expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.1
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "High error rate detected"
 
-      - alert: HighLatency
-        expr: histogram_quantile(0.95, rate(gateway_request_duration_seconds_bucket[5m])) > 1
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High latency detected"
-          description: "95th percentile latency is {{ $value }} seconds"
+  - alert: HighLatency
+    expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High latency detected"
+
+  - alert: ServiceDown
+    expr: up{job="api-gateway"} == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "API Gateway is down"
 ```
 
-## Security Configuration
+### Log Management
 
-### Network Security
+1. **Structured Logging**
+   ```yaml
+   observability:
+     logging:
+       level: "info"
+       format: "json"
+       structured_logging: true
+       correlation_id_header: "X-Correlation-ID"
+   ```
 
-1. **Network Policies**: Restrict pod-to-pod communication
-2. **Service Mesh**: Use Istio or Linkerd for mTLS
-3. **Ingress Security**: Configure proper ingress rules
+2. **Log Aggregation**
+   - Use Fluentd or Fluent Bit for log collection
+   - Send logs to Elasticsearch or similar
+   - Set up log retention policies
 
-### Pod Security
+## Disaster Recovery
+
+### Backup Procedures
+
+1. **Configuration Backup**
+   ```bash
+   #!/bin/bash
+   # backup-config.sh
+   
+   DATE=$(date +%Y%m%d_%H%M%S)
+   BACKUP_DIR="/backups/gateway-config-${DATE}"
+   
+   mkdir -p "${BACKUP_DIR}"
+   
+   # Backup Kubernetes resources
+   kubectl get configmap gateway-config -o yaml > "${BACKUP_DIR}/configmap.yaml"
+   kubectl get secret gateway-secrets -o yaml > "${BACKUP_DIR}/secrets.yaml"
+   kubectl get deployment api-gateway -o yaml > "${BACKUP_DIR}/deployment.yaml"
+   
+   # Backup configuration files
+   cp -r config/ "${BACKUP_DIR}/"
+   
+   # Create archive
+   tar -czf "/backups/gateway-backup-${DATE}.tar.gz" -C /backups "gateway-config-${DATE}"
+   
+   echo "Backup completed: gateway-backup-${DATE}.tar.gz"
+   ```
+
+2. **Database Backup** (if using persistent storage)
+   ```bash
+   # Backup Redis data
+   kubectl exec redis-0 -- redis-cli BGSAVE
+   kubectl cp redis-0:/data/dump.rdb ./backups/redis-backup-$(date +%Y%m%d).rdb
+   ```
+
+### Recovery Procedures
+
+1. **Configuration Recovery**
+   ```bash
+   #!/bin/bash
+   # restore-config.sh
+   
+   BACKUP_FILE="$1"
+   
+   if [ -z "$BACKUP_FILE" ]; then
+     echo "Usage: $0 <backup-file.tar.gz>"
+     exit 1
+   fi
+   
+   # Extract backup
+   tar -xzf "$BACKUP_FILE" -C /tmp/
+   
+   # Restore Kubernetes resources
+   kubectl apply -f /tmp/gateway-config-*/configmap.yaml
+   kubectl apply -f /tmp/gateway-config-*/secrets.yaml
+   kubectl apply -f /tmp/gateway-config-*/deployment.yaml
+   
+   echo "Configuration restored from $BACKUP_FILE"
+   ```
+
+2. **Rolling Back Deployment**
+   ```bash
+   # Rollback to previous version
+   kubectl rollout undo deployment/api-gateway
+   
+   # Rollback to specific revision
+   kubectl rollout undo deployment/api-gateway --to-revision=2
+   
+   # Check rollout status
+   kubectl rollout status deployment/api-gateway
+   ```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Gateway Won't Start**
+   ```bash
+   # Check logs
+   kubectl logs deployment/api-gateway
+   
+   # Check configuration
+   kubectl describe configmap gateway-config
+   
+   # Validate configuration
+   kubectl exec deployment/api-gateway -- /usr/local/bin/api-gateway --validate-config
+   ```
+
+2. **High Memory Usage**
+   ```bash
+   # Check memory metrics
+   kubectl top pods
+   
+   # Check for memory leaks
+   kubectl exec deployment/api-gateway -- ps aux
+   
+   # Restart pod if necessary
+   kubectl delete pod -l app=api-gateway
+   ```
+
+3. **Service Discovery Issues**
+   ```bash
+   # Check service discovery logs
+   kubectl logs deployment/api-gateway | grep "service_discovery"
+   
+   # Verify RBAC permissions
+   kubectl auth can-i get services --as=system:serviceaccount:api-gateway-prod:api-gateway
+   
+   # Check service endpoints
+   kubectl get endpoints
+   ```
+
+### Performance Troubleshooting
+
+1. **High Latency**
+   - Check upstream service health
+   - Review circuit breaker status
+   - Analyze request patterns
+   - Check resource utilization
+
+2. **High Error Rate**
+   - Review error logs
+   - Check upstream connectivity
+   - Verify authentication configuration
+   - Analyze rate limiting settings
+
+### Debug Mode
+
+Enable debug mode for troubleshooting:
 
 ```yaml
-# Security context
-securityContext:
-  runAsNonRoot: true
-  runAsUser: 1000
-  fsGroup: 1000
-  capabilities:
-    drop:
-    - ALL
-  readOnlyRootFilesystem: true
-  allowPrivilegeEscalation: false
+observability:
+  logging:
+    level: "debug"
+    
+middleware:
+  pipeline:
+    settings:
+      log_execution: true
 ```
 
-### Secrets Management
+### Health Check Endpoints
 
-Use external secret management:
+- `/health` - Basic health check
+- `/ready` - Readiness check
+- `/metrics` - Prometheus metrics
+- `/debug/pprof` - Performance profiling (debug builds only)
 
-```yaml
-# External secrets operator
-apiVersion: external-secrets.io/v1beta1
-kind: SecretStore
-metadata:
-  name: vault-backend
-spec:
-  provider:
-    vault:
-      server: "https://vault.example.com"
-      path: "secret"
-      version: "v2"
-      auth:
-        kubernetes:
-          mountPath: "kubernetes"
-          role: "api-gateway"
-```
+## Maintenance
 
-## Performance Tuning
+### Regular Maintenance Tasks
 
-### JVM-like Tuning for Rust
+1. **Weekly**
+   - Review metrics and alerts
+   - Check log aggregation
+   - Verify backup integrity
 
-```bash
-# Environment variables for performance
-RUST_LOG=info
-TOKIO_WORKER_THREADS=8
-GATEWAY_MAX_CONNECTIONS=10000
-GATEWAY_CONNECTION_POOL_SIZE=100
-```
+2. **Monthly**
+   - Update dependencies
+   - Review security patches
+   - Performance optimization review
 
-### Kernel Parameters
+3. **Quarterly**
+   - Disaster recovery testing
+   - Security audit
+   - Capacity planning review
 
-```bash
-# /etc/sysctl.conf
-net.core.somaxconn = 65535
-net.core.netdev_max_backlog = 5000
-net.ipv4.tcp_max_syn_backlog = 65535
-net.ipv4.tcp_keepalive_time = 600
-net.ipv4.tcp_keepalive_intvl = 60
-net.ipv4.tcp_keepalive_probes = 3
-```
+### Upgrade Procedures
 
-### Resource Limits
+1. **Rolling Update**
+   ```bash
+   # Update image
+   kubectl set image deployment/api-gateway api-gateway=api-gateway:v1.1.0
+   
+   # Monitor rollout
+   kubectl rollout status deployment/api-gateway
+   ```
 
-```yaml
-# Optimized resource limits
-resources:
-  requests:
-    memory: "1Gi"
-    cpu: "1000m"
-  limits:
-    memory: "2Gi"
-    cpu: "2000m"
-```
+2. **Blue-Green Deployment**
+   ```bash
+   # Deploy new version alongside current
+   kubectl apply -f k8s/deployment-v2.yaml
+   
+   # Switch traffic
+   kubectl patch service api-gateway -p '{"spec":{"selector":{"version":"v2"}}}'
+   
+   # Remove old version
+   kubectl delete deployment api-gateway-v1
+   ```
 
-## Backup and Recovery
-
-### Configuration Backup
-
-```bash
-#!/bin/bash
-# backup-config.sh
-
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="/backups/gateway-config"
-
-# Create backup directory
-mkdir -p $BACKUP_DIR
-
-# Backup Kubernetes resources
-kubectl get configmap gateway-config -n api-gateway -o yaml > $BACKUP_DIR/configmap-$DATE.yaml
-kubectl get secret gateway-secrets -n api-gateway -o yaml > $BACKUP_DIR/secrets-$DATE.yaml
-
-# Backup configuration files
-tar -czf $BACKUP_DIR/config-$DATE.tar.gz config/
-
-echo "Backup completed: $BACKUP_DIR"
-```
-
-### Disaster Recovery
-
-1. **Multi-Region Deployment**: Deploy across multiple regions
-2. **Database Replication**: Replicate configuration data
-3. **Automated Failover**: Use DNS-based failover
-4. **Recovery Testing**: Regularly test recovery procedures
-
-This deployment guide provides comprehensive coverage of deploying the Rust API Gateway in various environments. Choose the deployment strategy that best fits your infrastructure and requirements.
+This deployment guide provides comprehensive instructions for deploying and maintaining the API Gateway in production environments. Follow these best practices to ensure reliable, secure, and performant operation.

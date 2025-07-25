@@ -1,0 +1,279 @@
+# Staging Configuration for API Gateway
+# This configuration is optimized for staging environment with debugging
+# and testing capabilities while maintaining production-like settings
+
+server:
+  http_port: 8080
+  https_port: 8443
+  metrics_port: 9090
+  bind_address: "0.0.0.0"
+  timeouts:
+    request_timeout: "45s"  # Longer for debugging
+    keepalive_timeout: "60s"
+    upstream_timeout: "20s"  # Longer for debugging
+  max_request_size: 20971520  # 20MB for testing
+  worker_threads: 2  # Limited for staging
+
+# Staging routes with enhanced logging
+routes:
+  - path: "/health"
+    methods: ["GET"]
+    upstream: "health-service"
+    middleware: ["metrics", "request_logging"]
+    timeout: "10s"
+    auth_required: false
+    required_roles: []
+
+  - path: "/ready"
+    methods: ["GET"]
+    upstream: "health-service"
+    middleware: ["metrics", "request_logging"]
+    timeout: "10s"
+    auth_required: false
+    required_roles: []
+
+  - path: "/api/v1/users"
+    methods: ["GET", "POST"]
+    upstream: "user-service"
+    middleware: ["auth", "rate_limiting", "metrics", "request_logging", "security_headers"]
+    timeout: "45s"
+    auth_required: true
+    required_roles: ["user", "admin"]
+
+  - path: "/api/v1/users/{id}"
+    methods: ["GET", "PUT", "DELETE"]
+    upstream: "user-service"
+    middleware: ["auth", "rate_limiting", "metrics", "request_logging", "security_headers"]
+    timeout: "45s"
+    auth_required: true
+    required_roles: ["user", "admin"]
+
+  # Test endpoints for staging
+  - path: "/api/test/*"
+    methods: ["GET", "POST", "PUT", "DELETE"]
+    upstream: "test-service"
+    middleware: ["metrics", "request_logging"]
+    timeout: "60s"
+    auth_required: false
+    required_roles: []
+
+upstreams:
+  user-service:
+    discovery:
+      type: "Kubernetes"
+      namespace: "staging"
+      service_name: "user-service"
+      port: 8080
+    load_balancer:
+      type: "RoundRobin"
+    health_check:
+      path: "/health"
+      interval: "20s"
+      timeout: "10s"
+      healthy_threshold: 1
+      unhealthy_threshold: 2
+    circuit_breaker:
+      failure_threshold: 10  # More lenient for staging
+      timeout: "30s"
+      success_threshold: 2
+
+  test-service:
+    discovery:
+      type: "Static"
+      endpoints: ["http://test-service:8080"]
+    load_balancer:
+      type: "RoundRobin"
+    health_check:
+      path: "/health"
+      interval: "30s"
+      timeout: "10s"
+      healthy_threshold: 1
+      unhealthy_threshold: 3
+
+  health-service:
+    discovery:
+      type: "Static"
+      endpoints: ["http://localhost:8080"]
+    load_balancer:
+      type: "RoundRobin"
+    health_check:
+      path: "/health"
+      interval: "30s"
+      timeout: "5s"
+      healthy_threshold: 1
+      unhealthy_threshold: 2
+
+middleware:
+  pipeline:
+    enabled: true
+    middleware:
+      - name: "tracing"
+        middleware_type: "tracing"
+        priority: 1
+        enabled: true
+        conditions: []
+        config:
+          service_name: "api-gateway-staging"
+          trace_bodies: true  # Enabled for debugging
+          trace_headers: true
+          excluded_headers: ["authorization", "cookie"]
+          custom_tags:
+            environment: "staging"
+
+      - name: "auth"
+        middleware_type: "authentication"
+        priority: 10
+        enabled: true
+        conditions:
+          - path_prefix: "/api/"
+        config:
+          jwt_validation: true
+          api_key_validation: true
+          cache_tokens: true
+          cache_ttl: "60s"  # Shorter for testing
+
+      - name: "rate_limiting"
+        middleware_type: "rate_limiting"
+        priority: 20
+        enabled: true
+        conditions:
+          - path_prefix: "/api/"
+        config:
+          default_limit: 5000  # Higher for testing
+          burst_limit: 7500
+          window: "60s"
+          storage: "Memory"  # Use memory for staging
+
+      - name: "metrics"
+        middleware_type: "metrics"
+        priority: 30
+        enabled: true
+        conditions: []
+        config:
+          detailed_metrics: true
+          per_route_metrics: true
+          per_upstream_metrics: true
+          custom_labels:
+            environment: "staging"
+
+      - name: "request_logging"
+        middleware_type: "request_logging"
+        priority: 40
+        enabled: true
+        conditions: []
+        config:
+          log_headers: true  # Enabled for debugging
+          log_body: true     # Enabled for debugging
+          log_response_headers: true
+          log_response_body: false
+          max_body_size: 4096
+          excluded_headers: ["authorization", "cookie"]
+          log_level: "debug"  # More verbose for staging
+
+      - name: "security_headers"
+        middleware_type: "security_headers"
+        priority: 90
+        enabled: true
+        conditions: []
+        config:
+          x_frame_options: "SAMEORIGIN"  # Less restrictive for staging
+          x_content_type_options: true
+          x_xss_protection: "1; mode=block"
+          strict_transport_security: "max-age=3600"  # Shorter for staging
+          content_security_policy: "default-src 'self' 'unsafe-inline' 'unsafe-eval'"
+          referrer_policy: "origin-when-cross-origin"
+          custom_headers:
+            X-Gateway-Version: "1.0.0-staging"
+            X-Environment: "staging"
+
+    settings:
+      max_execution_time: "45s"
+      continue_on_error: true  # More lenient for staging
+      collect_metrics: true
+      log_execution: true  # Enabled for debugging
+
+  rate_limiting:
+    default_limit: 5000
+    route_limits:
+      "/api/test/*": 10000  # Higher for testing
+    storage:
+      type: "Memory"
+
+  cors:
+    allowed_origins: ["*"]  # Permissive for staging
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+    allowed_headers: ["*"]
+    max_age: 3600
+    allow_credentials: true
+
+auth:
+  jwt:
+    secret: "staging-secret-key"  # Fixed secret for staging
+    algorithm: "HS256"
+    expiration: "2h"  # Longer for testing
+    issuer: "api-gateway-staging"
+    audience: "staging-api"
+
+  api_key:
+    header_name: "X-API-Key"
+    keys:
+      "staging-test-key": "test-user"  # Test key for staging
+
+observability:
+  metrics:
+    prometheus_enabled: true
+    endpoint_path: "/metrics"
+    custom_metrics: []
+
+  logging:
+    level: "debug"  # More verbose for staging
+    format: "json"
+    output:
+      type: "Stdout"
+    structured_logging: true
+
+  tracing:
+    enabled: true
+    backend:
+      type: "Jaeger"
+      endpoint: "http://jaeger:14268/api/traces"
+    sampling_rate: 1.0  # 100% sampling for staging
+    service_name: "api-gateway-staging"
+    environment: "staging"
+
+service_discovery:
+  kubernetes:
+    default_namespace: "staging"
+    watch_all_namespaces: false
+    resync_interval: "15s"  # More frequent for staging
+
+cache:
+  enabled: true
+  in_memory:
+    enabled: true
+    max_entries: 10000
+    max_memory_mb: 100
+    cleanup_interval: "60s"
+  redis:
+    enabled: false  # Disabled for staging simplicity
+  default_ttl: "60s"  # Shorter for testing
+  global_policy:
+    enabled: true
+    ttl: "60s"
+    cacheable_methods: ["GET", "HEAD"]
+    cacheable_status_codes: [200, 203, 204, 206, 300, 301, 404, 405, 410, 414, 501]
+    vary_headers: ["Accept", "Accept-Encoding"]
+    cache_authenticated: true  # Enabled for testing
+    max_response_size: 2097152  # 2MB
+    key_strategy:
+      type: "WithQuery"
+    enable_deduplication: true
+    enable_idempotency: true
+
+# Staging-specific settings
+staging:
+  debug_mode: true
+  verbose_logging: true
+  test_endpoints_enabled: true
+  mock_services_enabled: true
+  performance_profiling: true

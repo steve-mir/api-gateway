@@ -1,0 +1,322 @@
+# API Gateway Alerting Rules
+# These rules define alerts for monitoring the health and performance of the API Gateway
+
+groups:
+  - name: api-gateway-availability
+    interval: 30s
+    rules:
+      - alert: APIGatewayDown
+        expr: up{job="api-gateway"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: api-gateway
+          category: availability
+        annotations:
+          summary: "API Gateway instance is down"
+          description: "API Gateway instance {{ $labels.instance }} has been down for more than 1 minute."
+          runbook_url: "https://docs.example.com/runbooks/gateway-down"
+
+      - alert: APIGatewayHighErrorRate
+        expr: |
+          (
+            rate(http_requests_total{job="api-gateway",status=~"5.."}[5m]) /
+            rate(http_requests_total{job="api-gateway"}[5m])
+          ) * 100 > 5
+        for: 5m
+        labels:
+          severity: critical
+          service: api-gateway
+          category: errors
+        annotations:
+          summary: "High error rate detected in API Gateway"
+          description: "API Gateway error rate is {{ $value }}% over the last 5 minutes."
+          runbook_url: "https://docs.example.com/runbooks/high-error-rate"
+
+      - alert: APIGatewayHighLatency
+        expr: |
+          histogram_quantile(0.95, 
+            rate(http_request_duration_seconds_bucket{job="api-gateway"}[5m])
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: performance
+        annotations:
+          summary: "High latency detected in API Gateway"
+          description: "API Gateway 95th percentile latency is {{ $value }}s over the last 5 minutes."
+          runbook_url: "https://docs.example.com/runbooks/high-latency"
+
+      - alert: APIGatewayHighRequestRate
+        expr: rate(http_requests_total{job="api-gateway"}[5m]) > 1000
+        for: 2m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: traffic
+        annotations:
+          summary: "High request rate detected in API Gateway"
+          description: "API Gateway is receiving {{ $value }} requests per second."
+          runbook_url: "https://docs.example.com/runbooks/high-traffic"
+
+  - name: api-gateway-resources
+    interval: 30s
+    rules:
+      - alert: APIGatewayHighMemoryUsage
+        expr: |
+          (
+            process_resident_memory_bytes{job="api-gateway"} /
+            (1024 * 1024 * 1024)
+          ) > 1.5
+        for: 5m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: resources
+        annotations:
+          summary: "High memory usage in API Gateway"
+          description: "API Gateway memory usage is {{ $value }}GB."
+          runbook_url: "https://docs.example.com/runbooks/high-memory"
+
+      - alert: APIGatewayHighCPUUsage
+        expr: rate(process_cpu_seconds_total{job="api-gateway"}[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: resources
+        annotations:
+          summary: "High CPU usage in API Gateway"
+          description: "API Gateway CPU usage is {{ $value }}%."
+          runbook_url: "https://docs.example.com/runbooks/high-cpu"
+
+      - alert: APIGatewayTooManyConnections
+        expr: gateway_active_connections{job="api-gateway"} > 5000
+        for: 2m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: connections
+        annotations:
+          summary: "Too many active connections in API Gateway"
+          description: "API Gateway has {{ $value }} active connections."
+          runbook_url: "https://docs.example.com/runbooks/too-many-connections"
+
+  - name: api-gateway-circuit-breakers
+    interval: 30s
+    rules:
+      - alert: CircuitBreakerOpen
+        expr: gateway_circuit_breaker_state{state="open"} == 1
+        for: 1m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: circuit-breaker
+        annotations:
+          summary: "Circuit breaker is open"
+          description: "Circuit breaker for {{ $labels.upstream }} is open."
+          runbook_url: "https://docs.example.com/runbooks/circuit-breaker-open"
+
+      - alert: CircuitBreakerHighFailureRate
+        expr: |
+          (
+            rate(gateway_circuit_breaker_failures_total[5m]) /
+            rate(gateway_circuit_breaker_requests_total[5m])
+          ) * 100 > 50
+        for: 3m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: circuit-breaker
+        annotations:
+          summary: "High failure rate in circuit breaker"
+          description: "Circuit breaker for {{ $labels.upstream }} has {{ $value }}% failure rate."
+          runbook_url: "https://docs.example.com/runbooks/circuit-breaker-failures"
+
+  - name: api-gateway-rate-limiting
+    interval: 30s
+    rules:
+      - alert: RateLimitingHighHitRate
+        expr: |
+          (
+            rate(gateway_rate_limit_hits_total[5m]) /
+            rate(http_requests_total{job="api-gateway"}[5m])
+          ) * 100 > 20
+        for: 5m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: rate-limiting
+        annotations:
+          summary: "High rate limiting hit rate"
+          description: "Rate limiting is blocking {{ $value }}% of requests."
+          runbook_url: "https://docs.example.com/runbooks/high-rate-limiting"
+
+      - alert: RateLimitingStorageError
+        expr: increase(gateway_rate_limit_storage_errors_total[5m]) > 10
+        for: 1m
+        labels:
+          severity: critical
+          service: api-gateway
+          category: rate-limiting
+        annotations:
+          summary: "Rate limiting storage errors"
+          description: "Rate limiting storage has {{ $value }} errors in the last 5 minutes."
+          runbook_url: "https://docs.example.com/runbooks/rate-limit-storage-errors"
+
+  - name: api-gateway-upstream-health
+    interval: 30s
+    rules:
+      - alert: UpstreamServiceDown
+        expr: gateway_upstream_health{status="unhealthy"} == 1
+        for: 2m
+        labels:
+          severity: critical
+          service: api-gateway
+          category: upstream
+        annotations:
+          summary: "Upstream service is unhealthy"
+          description: "Upstream service {{ $labels.upstream }} is unhealthy."
+          runbook_url: "https://docs.example.com/runbooks/upstream-unhealthy"
+
+      - alert: UpstreamServiceHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(gateway_upstream_request_duration_seconds_bucket[5m])
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: upstream
+        annotations:
+          summary: "High latency to upstream service"
+          description: "95th percentile latency to {{ $labels.upstream }} is {{ $value }}s."
+          runbook_url: "https://docs.example.com/runbooks/upstream-high-latency"
+
+      - alert: UpstreamServiceHighErrorRate
+        expr: |
+          (
+            rate(gateway_upstream_requests_total{status=~"5.."}[5m]) /
+            rate(gateway_upstream_requests_total[5m])
+          ) * 100 > 10
+        for: 3m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: upstream
+        annotations:
+          summary: "High error rate from upstream service"
+          description: "Error rate from {{ $labels.upstream }} is {{ $value }}%."
+          runbook_url: "https://docs.example.com/runbooks/upstream-high-errors"
+
+  - name: api-gateway-authentication
+    interval: 30s
+    rules:
+      - alert: AuthenticationHighFailureRate
+        expr: |
+          (
+            rate(gateway_auth_failures_total[5m]) /
+            rate(gateway_auth_attempts_total[5m])
+          ) * 100 > 25
+        for: 5m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: authentication
+        annotations:
+          summary: "High authentication failure rate"
+          description: "Authentication failure rate is {{ $value }}%."
+          runbook_url: "https://docs.example.com/runbooks/auth-failures"
+
+      - alert: AuthenticationServiceDown
+        expr: gateway_auth_provider_health{status="unhealthy"} == 1
+        for: 1m
+        labels:
+          severity: critical
+          service: api-gateway
+          category: authentication
+        annotations:
+          summary: "Authentication service is down"
+          description: "Authentication provider {{ $labels.provider }} is unhealthy."
+          runbook_url: "https://docs.example.com/runbooks/auth-service-down"
+
+  - name: api-gateway-caching
+    interval: 30s
+    rules:
+      - alert: CacheHighMissRate
+        expr: |
+          (
+            rate(gateway_cache_misses_total[5m]) /
+            rate(gateway_cache_requests_total[5m])
+          ) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: caching
+        annotations:
+          summary: "High cache miss rate"
+          description: "Cache miss rate is {{ $value }}%."
+          runbook_url: "https://docs.example.com/runbooks/high-cache-miss"
+
+      - alert: CacheStorageError
+        expr: increase(gateway_cache_storage_errors_total[5m]) > 5
+        for: 1m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: caching
+        annotations:
+          summary: "Cache storage errors"
+          description: "Cache storage has {{ $value }} errors in the last 5 minutes."
+          runbook_url: "https://docs.example.com/runbooks/cache-storage-errors"
+
+  - name: api-gateway-kubernetes
+    interval: 30s
+    rules:
+      - alert: APIGatewayPodCrashLooping
+        expr: |
+          rate(kube_pod_container_status_restarts_total{
+            container="api-gateway"
+          }[5m]) * 60 * 5 > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: api-gateway
+          category: kubernetes
+        annotations:
+          summary: "API Gateway pod is crash looping"
+          description: "Pod {{ $labels.pod }} is crash looping."
+          runbook_url: "https://docs.example.com/runbooks/pod-crash-loop"
+
+      - alert: APIGatewayPodNotReady
+        expr: |
+          kube_pod_status_ready{
+            condition="false",
+            pod=~"api-gateway-.*"
+          } == 1
+        for: 5m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: kubernetes
+        annotations:
+          summary: "API Gateway pod is not ready"
+          description: "Pod {{ $labels.pod }} is not ready."
+          runbook_url: "https://docs.example.com/runbooks/pod-not-ready"
+
+      - alert: APIGatewayDeploymentReplicasMismatch
+        expr: |
+          kube_deployment_spec_replicas{deployment="api-gateway"} !=
+          kube_deployment_status_replicas_available{deployment="api-gateway"}
+        for: 10m
+        labels:
+          severity: warning
+          service: api-gateway
+          category: kubernetes
+        annotations:
+          summary: "API Gateway deployment replicas mismatch"
+          description: "Deployment has {{ $labels.spec_replicas }} desired replicas but {{ $labels.available_replicas }} available."
+          runbook_url: "https://docs.example.com/runbooks/replicas-mismatch"

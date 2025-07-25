@@ -1,0 +1,462 @@
+# Production Monitoring Configuration for API Gateway
+# This file contains comprehensive monitoring and alerting rules for production deployment
+
+# =============================================================================
+# PROMETHEUS CONFIGURATION
+# =============================================================================
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'production'
+    environment: 'prod'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Load alerting rules
+rule_files:
+  - "alerts/gateway-alerts.yml"
+  - "alerts/infrastructure-alerts.yml"
+  - "alerts/business-alerts.yml"
+
+# Scrape configurations
+scrape_configs:
+  # API Gateway metrics
+  - job_name: 'api-gateway'
+    static_configs:
+      - targets: ['api-gateway:9090']
+    scrape_interval: 15s
+    metrics_path: /metrics
+    scheme: http
+    
+    # Kubernetes service discovery for gateway pods
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - api-gateway
+    
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+        action: keep
+        regex: api-gateway
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        target_label: __address__
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+
+  # Node exporter for system metrics
+  - job_name: 'node-exporter'
+    kubernetes_sd_configs:
+      - role: node
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '(.*):10250'
+        target_label: __address__
+        replacement: '${1}:9100'
+
+  # Kubernetes API server
+  - job_name: 'kubernetes-apiservers'
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names:
+            - default
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: default;kubernetes;https
+
+  # Redis metrics (if using Redis for caching/rate limiting)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+
+# =============================================================================
+# GRAFANA DASHBOARD CONFIGURATION
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-gateway
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  gateway-dashboard.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "API Gateway - Production Dashboard",
+        "tags": ["api-gateway", "production"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Request Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(gateway_requests_total[5m])",
+                "legendFormat": "{{method}} {{route}}"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Requests/sec"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "title": "Response Time",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, rate(gateway_request_duration_seconds_bucket[5m]))",
+                "legendFormat": "95th percentile"
+              },
+              {
+                "expr": "histogram_quantile(0.50, rate(gateway_request_duration_seconds_bucket[5m]))",
+                "legendFormat": "50th percentile"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Seconds"
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "title": "Error Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(gateway_requests_total{status=~\"5..\"}[5m]) / rate(gateway_requests_total[5m])",
+                "legendFormat": "5xx Error Rate"
+              },
+              {
+                "expr": "rate(gateway_requests_total{status=~\"4..\"}[5m]) / rate(gateway_requests_total[5m])",
+                "legendFormat": "4xx Error Rate"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Error Rate",
+                "max": 1,
+                "min": 0
+              }
+            ]
+          },
+          {
+            "id": 4,
+            "title": "Active Connections",
+            "type": "singlestat",
+            "targets": [
+              {
+                "expr": "gateway_active_connections",
+                "legendFormat": "Active Connections"
+              }
+            ]
+          },
+          {
+            "id": 5,
+            "title": "Cache Hit Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(gateway_cache_hits_total[5m]) / (rate(gateway_cache_hits_total[5m]) + rate(gateway_cache_misses_total[5m]))",
+                "legendFormat": "Cache Hit Rate"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Hit Rate",
+                "max": 1,
+                "min": 0
+              }
+            ]
+          },
+          {
+            "id": 6,
+            "title": "Upstream Service Health",
+            "type": "table",
+            "targets": [
+              {
+                "expr": "gateway_upstream_health_status",
+                "format": "table",
+                "instant": true
+              }
+            ]
+          },
+          {
+            "id": 7,
+            "title": "Rate Limiting",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(gateway_rate_limit_exceeded_total[5m])",
+                "legendFormat": "Rate Limited Requests"
+              }
+            ]
+          },
+          {
+            "id": 8,
+            "title": "Circuit Breaker Status",
+            "type": "table",
+            "targets": [
+              {
+                "expr": "gateway_circuit_breaker_state",
+                "format": "table",
+                "instant": true
+              }
+            ]
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s"
+      }
+    }
+
+# =============================================================================
+# ALERTMANAGER CONFIGURATION
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+data:
+  alertmanager.yml: |
+    global:
+      smtp_smarthost: 'smtp.example.com:587'
+      smtp_from: 'alerts@example.com'
+      smtp_auth_username: 'alerts@example.com'
+      smtp_auth_password: 'password'
+
+    # Inhibition rules
+    inhibit_rules:
+      - source_match:
+          severity: 'critical'
+        target_match:
+          severity: 'warning'
+        equal: ['alertname', 'cluster', 'service']
+
+    # Routing configuration
+    route:
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: 'web.hook'
+      routes:
+        - match:
+            severity: critical
+          receiver: 'critical-alerts'
+          group_wait: 5s
+          repeat_interval: 30m
+        - match:
+            severity: warning
+          receiver: 'warning-alerts'
+          repeat_interval: 2h
+        - match:
+            alertname: 'GatewayDown'
+          receiver: 'gateway-down'
+          group_wait: 0s
+          repeat_interval: 5m
+
+    # Receivers configuration
+    receivers:
+      - name: 'web.hook'
+        webhook_configs:
+          - url: 'http://webhook-service:5000/alerts'
+            send_resolved: true
+
+      - name: 'critical-alerts'
+        email_configs:
+          - to: 'oncall@example.com'
+            subject: 'CRITICAL: API Gateway Alert'
+            body: |
+              Alert: {{ .GroupLabels.alertname }}
+              Severity: {{ .CommonLabels.severity }}
+              Instance: {{ .CommonLabels.instance }}
+              Summary: {{ .CommonAnnotations.summary }}
+              Description: {{ .CommonAnnotations.description }}
+        slack_configs:
+          - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+            channel: '#critical-alerts'
+            title: 'API Gateway Critical Alert'
+            text: '{{ .CommonAnnotations.summary }}'
+
+      - name: 'warning-alerts'
+        email_configs:
+          - to: 'team@example.com'
+            subject: 'WARNING: API Gateway Alert'
+            body: |
+              Alert: {{ .GroupLabels.alertname }}
+              Severity: {{ .CommonLabels.severity }}
+              Instance: {{ .CommonLabels.instance }}
+              Summary: {{ .CommonAnnotations.summary }}
+
+      - name: 'gateway-down'
+        email_configs:
+          - to: 'oncall@example.com'
+            subject: 'URGENT: API Gateway is DOWN'
+            body: |
+              The API Gateway is completely down!
+              This requires immediate attention.
+              
+              Instance: {{ .CommonLabels.instance }}
+              Time: {{ .CommonAnnotations.timestamp }}
+        slack_configs:
+          - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+            channel: '#incidents'
+            title: 'API Gateway DOWN - URGENT'
+            text: 'API Gateway is completely down! Immediate attention required.'
+            color: 'danger'
+
+# =============================================================================
+# JAEGER TRACING CONFIGURATION
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger-config
+  namespace: monitoring
+data:
+  jaeger.yml: |
+    # Jaeger configuration for distributed tracing
+    collector:
+      zipkin:
+        host-port: ":9411"
+      
+    storage:
+      type: elasticsearch
+      options:
+        es:
+          server-urls: http://elasticsearch:9200
+          index-prefix: jaeger
+          
+    query:
+      base-path: /jaeger
+
+# =============================================================================
+# LOKI LOGGING CONFIGURATION
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: monitoring
+data:
+  loki.yml: |
+    auth_enabled: false
+
+    server:
+      http_listen_port: 3100
+
+    ingester:
+      lifecycler:
+        address: 127.0.0.1
+        ring:
+          kvstore:
+            store: inmemory
+          replication_factor: 1
+        final_sleep: 0s
+      chunk_idle_period: 5m
+      chunk_retain_period: 30s
+
+    schema_config:
+      configs:
+        - from: 2020-10-24
+          store: boltdb
+          object_store: filesystem
+          schema: v11
+          index:
+            prefix: index_
+            period: 168h
+
+    storage_config:
+      boltdb:
+        directory: /loki/index
+      filesystem:
+        directory: /loki/chunks
+
+    limits_config:
+      enforce_metric_name: false
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+
+# =============================================================================
+# FLUENT BIT LOG COLLECTION
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit-config
+  namespace: monitoring
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush         1
+        Log_Level     info
+        Daemon        off
+        Parsers_File  parsers.conf
+
+    [INPUT]
+        Name              tail
+        Path              /var/log/gateway/*.log
+        Parser            json
+        Tag               gateway.*
+        Refresh_Interval  5
+        Mem_Buf_Limit     50MB
+
+    [FILTER]
+        Name                kubernetes
+        Match               gateway.*
+        Kube_URL            https://kubernetes.default.svc:443
+        Kube_CA_File        /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        Kube_Token_File     /var/run/secrets/kubernetes.io/serviceaccount/token
+        Merge_Log           On
+        K8S-Logging.Parser  On
+        K8S-Logging.Exclude Off
+
+    [OUTPUT]
+        Name  loki
+        Match *
+        Host  loki
+        Port  3100
+        Labels job=gateway
+
+  parsers.conf: |
+    [PARSER]
+        Name        json
+        Format      json
+        Time_Key    timestamp
+        Time_Format %Y-%m-%dT%H:%M:%S.%L%z

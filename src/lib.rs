@@ -96,7 +96,7 @@ pub use core::config::{GatewayConfig, ConfigManager};
 /// Common result type used throughout the gateway
 /// This is a type alias: `type GatewayResult<T> = Result<T, GatewayError>`
 /// Similar to how many languages define custom result/error types
-pub use core::types::{Request, Response, RequestContext};
+pub use core::types::{IncomingRequest as Request, GatewayResponse as Response, RequestContext};
 
 /// Router builder for creating request routing configurations
 /// Re-exported because it's part of the main public API

@@ -1,18 +1,29 @@
 #!/bin/bash
 
-# API Gateway Kubernetes Deployment Script
-# This script demonstrates the complete deployment process for the API Gateway
+# API Gateway Deployment Script
+# This script automates the deployment of the API Gateway to various environments
+# with comprehensive validation, rollback capabilities, and monitoring integration
 
 set -euo pipefail
 
-# Configuration
-NAMESPACE="${NAMESPACE:-api-gateway}"
-IMAGE_TAG="${IMAGE_TAG:-latest}"
-REGISTRY="${REGISTRY:-}"
-KUBECTL_CONTEXT="${KUBECTL_CONTEXT:-}"
-DRY_RUN="${DRY_RUN:-false}"
-SKIP_BUILD="${SKIP_BUILD:-false}"
-WAIT_TIMEOUT="${WAIT_TIMEOUT:-300s}"
+# Script configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+LOG_FILE="/tmp/gateway-deploy-${TIMESTAMP}.log"
+
+# Default values
+ENVIRONMENT="staging"
+IMAGE_TAG="latest"
+NAMESPACE=""
+CONFIG_FILE=""
+DRY_RUN=false
+SKIP_TESTS=false
+ROLLBACK=false
+PREVIOUS_VERSION=""
+TIMEOUT=600
+HEALTH_CHECK_RETRIES=30
+HEALTH_CHECK_INTERVAL=10
 
 # Colors for output
 RED='\033[0;31m'
@@ -22,412 +33,513 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Logging functions
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+log() {
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] INFO: $1${NC}" | tee -a "$LOG_FILE"
 }
 
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+warn() {
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARN: $1${NC}" | tee -a "$LOG_FILE"
 }
 
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+error() {
+    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}" | tee -a "$LOG_FILE"
 }
 
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+success() {
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] SUCCESS: $1${NC}" | tee -a "$LOG_FILE"
 }
 
-# Help function
-show_help() {
+# Usage function
+usage() {
     cat << EOF
-API Gateway Kubernetes Deployment Script
-
 Usage: $0 [OPTIONS]
 
-Options:
-    -h, --help              Show this help message
-    -n, --namespace NAME    Kubernetes namespace (default: api-gateway)
-    -t, --tag TAG          Docker image tag (default: latest)
-    -r, --registry URL     Docker registry URL
-    -c, --context CONTEXT  Kubectl context to use
-    -d, --dry-run          Perform a dry run without applying changes
-    -s, --skip-build       Skip Docker image build
-    -w, --wait TIMEOUT     Wait timeout for deployments (default: 300s)
+Deploy API Gateway to Kubernetes
 
-Environment Variables:
-    NAMESPACE              Kubernetes namespace
-    IMAGE_TAG              Docker image tag
-    REGISTRY               Docker registry URL
-    KUBECTL_CONTEXT        Kubectl context
-    DRY_RUN                Perform dry run (true/false)
-    SKIP_BUILD             Skip build (true/false)
-    WAIT_TIMEOUT           Wait timeout
+OPTIONS:
+    -e, --environment ENV       Target environment (staging, production) [default: staging]
+    -t, --tag TAG              Docker image tag [default: latest]
+    -n, --namespace NAMESPACE  Kubernetes namespace [default: api-gateway-ENV]
+    -c, --config CONFIG        Configuration file path
+    -d, --dry-run              Perform a dry run without making changes
+    -s, --skip-tests           Skip pre-deployment tests
+    -r, --rollback VERSION     Rollback to previous version
+    --timeout SECONDS          Deployment timeout in seconds [default: 600]
+    --health-retries COUNT     Health check retry count [default: 30]
+    --health-interval SECONDS  Health check interval [default: 10]
+    -h, --help                 Show this help message
 
-Examples:
-    # Basic deployment
-    $0
+EXAMPLES:
+    # Deploy to staging
+    $0 --environment staging --tag v1.2.0
 
-    # Deploy to specific namespace with custom tag
-    $0 --namespace production --tag v1.2.3
+    # Deploy to production with custom config
+    $0 --environment production --tag v1.2.0 --config config/production.yaml
 
     # Dry run deployment
-    $0 --dry-run
+    $0 --environment production --tag v1.2.0 --dry-run
 
-    # Deploy with custom registry
-    $0 --registry my-registry.com --tag v1.2.3
+    # Rollback to previous version
+    $0 --environment production --rollback v1.1.0
+
 EOF
 }
 
 # Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -h|--help)
-            show_help
-            exit 0
-            ;;
-        -n|--namespace)
-            NAMESPACE="$2"
-            shift 2
-            ;;
-        -t|--tag)
-            IMAGE_TAG="$2"
-            shift 2
-            ;;
-        -r|--registry)
-            REGISTRY="$2"
-            shift 2
-            ;;
-        -c|--context)
-            KUBECTL_CONTEXT="$2"
-            shift 2
-            ;;
-        -d|--dry-run)
-            DRY_RUN="true"
-            shift
-            ;;
-        -s|--skip-build)
-            SKIP_BUILD="true"
-            shift
-            ;;
-        -w|--wait)
-            WAIT_TIMEOUT="$2"
-            shift 2
-            ;;
-        *)
-            log_error "Unknown option: $1"
-            show_help
-            exit 1
-            ;;
-    esac
-done
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -e|--environment)
+                ENVIRONMENT="$2"
+                shift 2
+                ;;
+            -t|--tag)
+                IMAGE_TAG="$2"
+                shift 2
+                ;;
+            -n|--namespace)
+                NAMESPACE="$2"
+                shift 2
+                ;;
+            -c|--config)
+                CONFIG_FILE="$2"
+                shift 2
+                ;;
+            -d|--dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            -s|--skip-tests)
+                SKIP_TESTS=true
+                shift
+                ;;
+            -r|--rollback)
+                ROLLBACK=true
+                PREVIOUS_VERSION="$2"
+                shift 2
+                ;;
+            --timeout)
+                TIMEOUT="$2"
+                shift 2
+                ;;
+            --health-retries)
+                HEALTH_CHECK_RETRIES="$2"
+                shift 2
+                ;;
+            --health-interval)
+                HEALTH_CHECK_INTERVAL="$2"
+                shift 2
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1"
+                usage
+                exit 1
+                ;;
+        esac
+    done
+
+    # Set default namespace if not provided
+    if [[ -z "$NAMESPACE" ]]; then
+        NAMESPACE="api-gateway-${ENVIRONMENT}"
+    fi
+
+    # Set default config file if not provided
+    if [[ -z "$CONFIG_FILE" ]]; then
+        CONFIG_FILE="${PROJECT_ROOT}/config/${ENVIRONMENT}.yaml"
+    fi
+}
 
 # Validate prerequisites
-check_prerequisites() {
-    log_info "Checking prerequisites..."
-    
-    # Check if kubectl is installed
-    if ! command -v kubectl &> /dev/null; then
-        log_error "kubectl is not installed or not in PATH"
-        exit 1
-    fi
-    
-    # Check if docker is installed (unless skipping build)
-    if [[ "$SKIP_BUILD" != "true" ]] && ! command -v docker &> /dev/null; then
-        log_error "docker is not installed or not in PATH"
-        exit 1
-    fi
-    
-    # Check kubectl context
-    if [[ -n "$KUBECTL_CONTEXT" ]]; then
-        if ! kubectl config use-context "$KUBECTL_CONTEXT" &> /dev/null; then
-            log_error "Failed to switch to kubectl context: $KUBECTL_CONTEXT"
+validate_prerequisites() {
+    log "Validating prerequisites..."
+
+    # Check required tools
+    local required_tools=("kubectl" "docker" "helm")
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" &> /dev/null; then
+            error "$tool is required but not installed"
             exit 1
         fi
-        log_info "Using kubectl context: $KUBECTL_CONTEXT"
-    fi
-    
-    # Check cluster connectivity
+    done
+
+    # Check kubectl connectivity
     if ! kubectl cluster-info &> /dev/null; then
-        log_error "Cannot connect to Kubernetes cluster"
+        error "Cannot connect to Kubernetes cluster"
         exit 1
     fi
-    
-    log_success "Prerequisites check passed"
+
+    # Check if namespace exists
+    if ! kubectl get namespace "$NAMESPACE" &> /dev/null; then
+        warn "Namespace $NAMESPACE does not exist, creating it..."
+        if [[ "$DRY_RUN" == "false" ]]; then
+            kubectl create namespace "$NAMESPACE"
+        fi
+    fi
+
+    # Validate configuration file
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        error "Configuration file not found: $CONFIG_FILE"
+        exit 1
+    fi
+
+    # Validate Docker image exists
+    if [[ "$DRY_RUN" == "false" ]] && [[ "$ROLLBACK" == "false" ]]; then
+        log "Validating Docker image: api-gateway:${IMAGE_TAG}"
+        if ! docker manifest inspect "api-gateway:${IMAGE_TAG}" &> /dev/null; then
+            error "Docker image api-gateway:${IMAGE_TAG} not found"
+            exit 1
+        fi
+    fi
+
+    success "Prerequisites validation completed"
 }
 
-# Build Docker image
-build_image() {
-    if [[ "$SKIP_BUILD" == "true" ]]; then
-        log_info "Skipping Docker image build"
-        return
+# Run pre-deployment tests
+run_tests() {
+    if [[ "$SKIP_TESTS" == "true" ]]; then
+        warn "Skipping pre-deployment tests"
+        return 0
     fi
-    
-    log_info "Building Docker image..."
-    
-    local image_name="api-gateway"
-    if [[ -n "$REGISTRY" ]]; then
-        image_name="${REGISTRY}/api-gateway"
+
+    log "Running pre-deployment tests..."
+
+    # Configuration validation
+    log "Validating configuration..."
+    if ! "${PROJECT_ROOT}/target/release/api-gateway" --config "$CONFIG_FILE" --validate-config &> /dev/null; then
+        error "Configuration validation failed"
+        exit 1
     fi
-    
-    local full_image_name="${image_name}:${IMAGE_TAG}"
-    
-    if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "DRY RUN: Would build image: $full_image_name"
-        return
+
+    # Unit tests
+    log "Running unit tests..."
+    cd "$PROJECT_ROOT"
+    if ! cargo test --release &> /dev/null; then
+        error "Unit tests failed"
+        exit 1
     fi
-    
-    # Build the image
-    docker build -t "$full_image_name" .
-    
-    # Push to registry if specified
-    if [[ -n "$REGISTRY" ]]; then
-        log_info "Pushing image to registry..."
-        docker push "$full_image_name"
+
+    # Integration tests (if available)
+    if [[ -f "${PROJECT_ROOT}/scripts/integration-tests.sh" ]]; then
+        log "Running integration tests..."
+        if ! "${PROJECT_ROOT}/scripts/integration-tests.sh"; then
+            error "Integration tests failed"
+            exit 1
+        fi
     fi
-    
-    log_success "Docker image built: $full_image_name"
+
+    success "Pre-deployment tests completed"
 }
 
-# Create namespace if it doesn't exist
-create_namespace() {
-    log_info "Creating namespace: $NAMESPACE"
-    
-    if kubectl get namespace "$NAMESPACE" &> /dev/null; then
-        log_info "Namespace $NAMESPACE already exists"
-        return
-    fi
-    
-    if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "DRY RUN: Would create namespace: $NAMESPACE"
-        return
-    fi
-    
-    kubectl apply -f k8s/namespace.yaml
-    log_success "Namespace created: $NAMESPACE"
+# Create backup of current deployment
+create_backup() {
+    log "Creating backup of current deployment..."
+
+    local backup_dir="${PROJECT_ROOT}/backups/deployment-${TIMESTAMP}"
+    mkdir -p "$backup_dir"
+
+    # Backup current deployment
+    kubectl get deployment api-gateway -n "$NAMESPACE" -o yaml > "${backup_dir}/deployment.yaml" 2>/dev/null || true
+    kubectl get configmap gateway-config -n "$NAMESPACE" -o yaml > "${backup_dir}/configmap.yaml" 2>/dev/null || true
+    kubectl get secret gateway-secrets -n "$NAMESPACE" -o yaml > "${backup_dir}/secrets.yaml" 2>/dev/null || true
+    kubectl get service api-gateway -n "$NAMESPACE" -o yaml > "${backup_dir}/service.yaml" 2>/dev/null || true
+
+    # Save current image tag
+    local current_image
+    current_image=$(kubectl get deployment api-gateway -n "$NAMESPACE" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "none")
+    echo "$current_image" > "${backup_dir}/current-image.txt"
+
+    log "Backup created at: $backup_dir"
 }
 
-# Apply Kubernetes manifests
-apply_manifests() {
-    log_info "Applying Kubernetes manifests..."
-    
-    local kubectl_cmd="kubectl"
+# Update configuration
+update_configuration() {
+    log "Updating configuration..."
+
+    # Create ConfigMap from configuration file
     if [[ "$DRY_RUN" == "true" ]]; then
-        kubectl_cmd="kubectl --dry-run=client"
-        log_info "DRY RUN: Validating manifests..."
+        log "[DRY RUN] Would create ConfigMap from $CONFIG_FILE"
+    else
+        kubectl create configmap gateway-config \
+            --from-file="$CONFIG_FILE" \
+            --namespace="$NAMESPACE" \
+            --dry-run=client -o yaml | kubectl apply -f -
     fi
-    
-    # Apply manifests in order
-    local manifests=(
-        "k8s/namespace.yaml"
-        "k8s/rbac.yaml"
-        "k8s/secret.yaml"
-        "k8s/configmap.yaml"
-        "k8s/service.yaml"
-        "k8s/deployment.yaml"
-        "k8s/hpa.yaml"
-        "k8s/pdb.yaml"
-        "k8s/networkpolicy.yaml"
-        "k8s/ingress.yaml"
-    )
-    
-    for manifest in "${manifests[@]}"; do
-        if [[ -f "$manifest" ]]; then
-            log_info "Applying $manifest..."
-            
-            # Update image tag in deployment manifest
-            if [[ "$manifest" == "k8s/deployment.yaml" ]]; then
-                local temp_manifest="/tmp/deployment-${RANDOM}.yaml"
-                local image_name="api-gateway"
-                if [[ -n "$REGISTRY" ]]; then
-                    image_name="${REGISTRY}/api-gateway"
-                fi
-                
-                sed "s|image: api-gateway:latest|image: ${image_name}:${IMAGE_TAG}|g" "$manifest" > "$temp_manifest"
-                $kubectl_cmd apply -f "$temp_manifest"
-                rm -f "$temp_manifest"
-            else
-                $kubectl_cmd apply -f "$manifest"
-            fi
+
+    # Update secrets if they exist
+    if [[ -f "${PROJECT_ROOT}/secrets/${ENVIRONMENT}-secrets.yaml" ]]; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            log "[DRY RUN] Would apply secrets"
         else
-            log_warning "Manifest not found: $manifest"
+            kubectl apply -f "${PROJECT_ROOT}/secrets/${ENVIRONMENT}-secrets.yaml" -n "$NAMESPACE"
+        fi
+    fi
+
+    success "Configuration updated"
+}
+
+# Deploy application
+deploy_application() {
+    if [[ "$ROLLBACK" == "true" ]]; then
+        rollback_deployment
+        return
+    fi
+
+    log "Deploying API Gateway version $IMAGE_TAG to $ENVIRONMENT..."
+
+    # Update deployment image
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would update deployment image to api-gateway:${IMAGE_TAG}"
+    else
+        kubectl set image deployment/api-gateway \
+            api-gateway="api-gateway:${IMAGE_TAG}" \
+            --namespace="$NAMESPACE"
+    fi
+
+    # Wait for rollout to complete
+    if [[ "$DRY_RUN" == "false" ]]; then
+        log "Waiting for deployment rollout to complete..."
+        if ! kubectl rollout status deployment/api-gateway \
+            --namespace="$NAMESPACE" \
+            --timeout="${TIMEOUT}s"; then
+            error "Deployment rollout failed"
+            return 1
+        fi
+    fi
+
+    success "Application deployed successfully"
+}
+
+# Rollback deployment
+rollback_deployment() {
+    log "Rolling back to version $PREVIOUS_VERSION..."
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would rollback to version $PREVIOUS_VERSION"
+        return
+    fi
+
+    # Rollback using kubectl
+    if [[ -n "$PREVIOUS_VERSION" ]]; then
+        kubectl set image deployment/api-gateway \
+            api-gateway="api-gateway:${PREVIOUS_VERSION}" \
+            --namespace="$NAMESPACE"
+    else
+        kubectl rollout undo deployment/api-gateway --namespace="$NAMESPACE"
+    fi
+
+    # Wait for rollback to complete
+    log "Waiting for rollback to complete..."
+    if ! kubectl rollout status deployment/api-gateway \
+        --namespace="$NAMESPACE" \
+        --timeout="${TIMEOUT}s"; then
+        error "Rollback failed"
+        return 1
+    fi
+
+    success "Rollback completed successfully"
+}
+
+# Perform health checks
+health_check() {
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would perform health checks"
+        return 0
+    fi
+
+    log "Performing health checks..."
+
+    # Get service endpoint
+    local service_ip
+    service_ip=$(kubectl get service api-gateway -n "$NAMESPACE" -o jsonpath='{.spec.clusterIP}')
+    
+    if [[ -z "$service_ip" ]]; then
+        error "Could not get service IP"
+        return 1
+    fi
+
+    # Health check loop
+    local retries=0
+    while [[ $retries -lt $HEALTH_CHECK_RETRIES ]]; do
+        log "Health check attempt $((retries + 1))/$HEALTH_CHECK_RETRIES..."
+        
+        # Port forward for health check
+        kubectl port-forward service/api-gateway 8080:8080 -n "$NAMESPACE" &
+        local port_forward_pid=$!
+        sleep 2
+
+        # Perform health check
+        if curl -f -s "http://localhost:8080/health" > /dev/null; then
+            kill $port_forward_pid 2>/dev/null || true
+            success "Health check passed"
+            return 0
+        fi
+
+        kill $port_forward_pid 2>/dev/null || true
+        retries=$((retries + 1))
+        
+        if [[ $retries -lt $HEALTH_CHECK_RETRIES ]]; then
+            log "Health check failed, retrying in ${HEALTH_CHECK_INTERVAL}s..."
+            sleep "$HEALTH_CHECK_INTERVAL"
         fi
     done
-    
-    if [[ "$DRY_RUN" != "true" ]]; then
-        log_success "Kubernetes manifests applied"
-    else
-        log_success "Manifest validation completed"
-    fi
-}
 
-# Wait for deployment to be ready
-wait_for_deployment() {
-    if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "DRY RUN: Would wait for deployment to be ready"
-        return
-    fi
-    
-    log_info "Waiting for deployment to be ready..."
-    
-    if kubectl wait --for=condition=available --timeout="$WAIT_TIMEOUT" deployment/api-gateway -n "$NAMESPACE"; then
-        log_success "Deployment is ready"
-    else
-        log_error "Deployment failed to become ready within $WAIT_TIMEOUT"
-        exit 1
-    fi
+    error "Health checks failed after $HEALTH_CHECK_RETRIES attempts"
+    return 1
 }
 
 # Verify deployment
 verify_deployment() {
+    log "Verifying deployment..."
+
     if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "DRY RUN: Would verify deployment"
-        return
+        log "[DRY RUN] Would verify deployment"
+        return 0
     fi
-    
-    log_info "Verifying deployment..."
-    
-    # Check deployment status
-    local deployment_status
-    deployment_status=$(kubectl get deployment api-gateway -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
-    
-    if [[ "$deployment_status" == "True" ]]; then
-        log_success "Deployment is available"
-    else
-        log_error "Deployment is not available"
-        kubectl describe deployment api-gateway -n "$NAMESPACE"
-        exit 1
-    fi
-    
+
     # Check pod status
     local ready_pods
     ready_pods=$(kubectl get deployment api-gateway -n "$NAMESPACE" -o jsonpath='{.status.readyReplicas}')
     local desired_pods
     desired_pods=$(kubectl get deployment api-gateway -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')
-    
-    log_info "Ready pods: $ready_pods/$desired_pods"
-    
-    if [[ "$ready_pods" == "$desired_pods" ]]; then
-        log_success "All pods are ready"
-    else
-        log_warning "Not all pods are ready"
-        kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/name=api-gateway
+
+    if [[ "$ready_pods" != "$desired_pods" ]]; then
+        error "Deployment verification failed: $ready_pods/$desired_pods pods ready"
+        return 1
     fi
-    
+
     # Check service endpoints
     local endpoints
-    endpoints=$(kubectl get endpoints api-gateway -n "$NAMESPACE" -o jsonpath='{.subsets[*].addresses[*].ip}' | wc -w)
-    
-    if [[ "$endpoints" -gt 0 ]]; then
-        log_success "Service has $endpoints endpoint(s)"
-    else
-        log_warning "Service has no endpoints"
+    endpoints=$(kubectl get endpoints api-gateway -n "$NAMESPACE" -o jsonpath='{.subsets[0].addresses}')
+    if [[ -z "$endpoints" ]]; then
+        error "No service endpoints available"
+        return 1
     fi
+
+    # Verify image version
+    local current_image
+    current_image=$(kubectl get deployment api-gateway -n "$NAMESPACE" -o jsonpath='{.spec.template.spec.containers[0].image}')
+    local expected_image="api-gateway:${IMAGE_TAG}"
     
-    # Display service information
-    log_info "Service information:"
-    kubectl get service api-gateway -n "$NAMESPACE"
-    
-    # Display ingress information if available
-    if kubectl get ingress api-gateway-ingress -n "$NAMESPACE" &> /dev/null; then
-        log_info "Ingress information:"
-        kubectl get ingress api-gateway-ingress -n "$NAMESPACE"
+    if [[ "$ROLLBACK" == "true" ]]; then
+        expected_image="api-gateway:${PREVIOUS_VERSION}"
     fi
+
+    if [[ "$current_image" != "$expected_image" ]]; then
+        error "Image verification failed: expected $expected_image, got $current_image"
+        return 1
+    fi
+
+    success "Deployment verification completed"
 }
 
-# Show deployment status
-show_status() {
-    log_info "Deployment Status Summary:"
-    echo "=========================="
-    echo "Namespace: $NAMESPACE"
-    echo "Image Tag: $IMAGE_TAG"
-    if [[ -n "$REGISTRY" ]]; then
-        echo "Registry: $REGISTRY"
-    fi
-    echo ""
-    
-    if [[ "$DRY_RUN" == "true" ]]; then
-        echo "DRY RUN MODE - No changes were applied"
-        return
-    fi
-    
-    # Show deployment status
-    echo "Deployments:"
-    kubectl get deployments -n "$NAMESPACE" -l app.kubernetes.io/name=api-gateway
-    echo ""
-    
-    # Show pod status
-    echo "Pods:"
-    kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/name=api-gateway
-    echo ""
-    
-    # Show service status
-    echo "Services:"
-    kubectl get services -n "$NAMESPACE" -l app.kubernetes.io/name=api-gateway
-    echo ""
-    
-    # Show HPA status
-    echo "Horizontal Pod Autoscalers:"
-    kubectl get hpa -n "$NAMESPACE" -l app.kubernetes.io/name=api-gateway
-    echo ""
-    
-    # Show ingress status
-    if kubectl get ingress -n "$NAMESPACE" &> /dev/null; then
-        echo "Ingresses:"
-        kubectl get ingress -n "$NAMESPACE"
-        echo ""
-    fi
-}
+# Send deployment notification
+send_notification() {
+    local status="$1"
+    local message="$2"
 
-# Cleanup function for error handling
-cleanup() {
-    local exit_code=$?
-    if [[ $exit_code -ne 0 ]]; then
-        log_error "Deployment failed with exit code $exit_code"
-        
-        if [[ "$DRY_RUN" != "true" ]]; then
-            log_info "Recent events in namespace $NAMESPACE:"
-            kubectl get events -n "$NAMESPACE" --sort-by='.lastTimestamp' | tail -10
+    log "Sending deployment notification..."
+
+    # Slack notification (if webhook URL is set)
+    if [[ -n "${SLACK_WEBHOOK_URL:-}" ]]; then
+        local color="good"
+        if [[ "$status" == "failed" ]]; then
+            color="danger"
         fi
+
+        curl -X POST -H 'Content-type: application/json' \
+            --data "{
+                \"attachments\": [{
+                    \"color\": \"$color\",
+                    \"title\": \"API Gateway Deployment\",
+                    \"fields\": [
+                        {\"title\": \"Environment\", \"value\": \"$ENVIRONMENT\", \"short\": true},
+                        {\"title\": \"Version\", \"value\": \"$IMAGE_TAG\", \"short\": true},
+                        {\"title\": \"Status\", \"value\": \"$status\", \"short\": true},
+                        {\"title\": \"Message\", \"value\": \"$message\", \"short\": false}
+                    ]
+                }]
+            }" \
+            "$SLACK_WEBHOOK_URL" || warn "Failed to send Slack notification"
     fi
-    exit $exit_code
+
+    # Email notification (if configured)
+    if [[ -n "${EMAIL_RECIPIENTS:-}" ]]; then
+        echo "$message" | mail -s "API Gateway Deployment - $status" "$EMAIL_RECIPIENTS" || warn "Failed to send email notification"
+    fi
 }
 
-# Set up error handling
-trap cleanup EXIT
+# Cleanup function
+cleanup() {
+    log "Performing cleanup..."
+    
+    # Kill any background processes
+    jobs -p | xargs -r kill 2>/dev/null || true
+    
+    # Remove temporary files
+    rm -f /tmp/kubectl-port-forward-* 2>/dev/null || true
+}
 
-# Main deployment process
+# Main deployment function
 main() {
-    log_info "Starting API Gateway deployment..."
-    log_info "Namespace: $NAMESPACE"
-    log_info "Image Tag: $IMAGE_TAG"
-    if [[ -n "$REGISTRY" ]]; then
-        log_info "Registry: $REGISTRY"
+    log "Starting API Gateway deployment..."
+    log "Environment: $ENVIRONMENT"
+    log "Image Tag: $IMAGE_TAG"
+    log "Namespace: $NAMESPACE"
+    log "Config File: $CONFIG_FILE"
+    log "Dry Run: $DRY_RUN"
+
+    # Set trap for cleanup
+    trap cleanup EXIT
+
+    # Validate prerequisites
+    validate_prerequisites
+
+    # Run tests
+    run_tests
+
+    # Create backup
+    create_backup
+
+    # Update configuration
+    update_configuration
+
+    # Deploy application
+    if ! deploy_application; then
+        error "Deployment failed"
+        send_notification "failed" "Deployment to $ENVIRONMENT failed"
+        exit 1
     fi
-    if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "DRY RUN MODE: No changes will be applied"
+
+    # Perform health checks
+    if ! health_check; then
+        error "Health checks failed"
+        send_notification "failed" "Health checks failed for $ENVIRONMENT deployment"
+        exit 1
     fi
-    echo ""
-    
-    check_prerequisites
-    build_image
-    create_namespace
-    apply_manifests
-    wait_for_deployment
-    verify_deployment
-    show_status
-    
-    log_success "API Gateway deployment completed successfully!"
-    
-    if [[ "$DRY_RUN" != "true" ]]; then
-        echo ""
-        log_info "Next steps:"
-        echo "1. Check the deployment status: kubectl get all -n $NAMESPACE"
-        echo "2. View logs: kubectl logs -f deployment/api-gateway -n $NAMESPACE"
-        echo "3. Access the gateway through the service or ingress"
-        echo "4. Monitor with: kubectl top pods -n $NAMESPACE"
+
+    # Verify deployment
+    if ! verify_deployment; then
+        error "Deployment verification failed"
+        send_notification "failed" "Deployment verification failed for $ENVIRONMENT"
+        exit 1
     fi
+
+    # Success
+    local action="Deployment"
+    if [[ "$ROLLBACK" == "true" ]]; then
+        action="Rollback"
+    fi
+
+    success "$action completed successfully!"
+    send_notification "success" "$action to $ENVIRONMENT completed successfully"
+
+    log "Deployment log saved to: $LOG_FILE"
 }
 
-# Run main function
-main "$@"
+# Parse arguments and run main function
+parse_args "$@"
+main

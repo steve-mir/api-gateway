@@ -1,0 +1,412 @@
+# Production Configuration for API Gateway
+# This configuration is optimized for production deployment with security,
+# performance, and reliability best practices
+
+server:
+  http_port: 8080
+  https_port: 8443
+  metrics_port: 9090
+  bind_address: "0.0.0.0"
+  timeouts:
+    request_timeout: "30s"
+    keepalive_timeout: "75s"  # Increased for production
+    upstream_timeout: "15s"   # Increased for production
+  max_request_size: 52428800  # 50MB for production
+  worker_threads: 0  # Use all available CPU cores
+
+# Production routes with comprehensive configuration
+routes:
+  # Health check endpoints (no auth required)
+  - path: "/health"
+    methods: ["GET"]
+    upstream: "health-service"
+    middleware: ["metrics", "request_logging"]
+    timeout: "5s"
+    auth_required: false
+    required_roles: []
+
+  - path: "/ready"
+    methods: ["GET"]
+    upstream: "health-service"
+    middleware: ["metrics", "request_logging"]
+    timeout: "5s"
+    auth_required: false
+    required_roles: []
+
+  # API v1 routes with authentication
+  - path: "/api/v1/users"
+    methods: ["GET", "POST"]
+    upstream: "user-service"
+    middleware: ["auth", "rate_limiting", "metrics", "request_logging", "security_headers"]
+    timeout: "30s"
+    auth_required: true
+    required_roles: ["user", "admin"]
+
+  - path: "/api/v1/users/{id}"
+    methods: ["GET", "PUT", "DELETE"]
+    upstream: "user-service"
+    middleware: ["auth", "rate_limiting", "metrics", "request_logging", "security_headers"]
+    timeout: "30s"
+    auth_required: true
+    required_roles: ["user", "admin"]
+
+  - path: "/api/v1/admin/*"
+    methods: ["GET", "POST", "PUT", "DELETE"]
+    upstream: "admin-service"
+    middleware: ["auth", "admin_rate_limiting", "metrics", "audit_logging", "security_headers"]
+    timeout: "45s"
+    auth_required: true
+    required_roles: ["admin"]
+
+# Production upstream configuration with high availability
+upstreams:
+  user-service:
+    discovery:
+      type: "Kubernetes"
+      namespace: "production"
+      service_name: "user-service"
+      port: 8080
+    load_balancer:
+      type: "LeastConnections"  # Better for production
+      health_check_interval: "10s"
+    health_check:
+      path: "/health"
+      interval: "15s"
+      timeout: "5s"
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+    circuit_breaker:
+      failure_threshold: 5
+      timeout: "60s"
+      success_threshold: 3
+
+  admin-service:
+    discovery:
+      type: "Kubernetes"
+      namespace: "production"
+      service_name: "admin-service"
+      port: 8080
+    load_balancer:
+      type: "RoundRobin"
+    health_check:
+      path: "/health"
+      interval: "15s"
+      timeout: "5s"
+      healthy_threshold: 2
+      unhealthy_threshold: 3
+    circuit_breaker:
+      failure_threshold: 3
+      timeout: "30s"
+      success_threshold: 2
+
+  health-service:
+    discovery:
+      type: "Static"
+      endpoints: ["http://localhost:8080"]  # Internal health service
+    load_balancer:
+      type: "RoundRobin"
+    health_check:
+      path: "/health"
+      interval: "30s"
+      timeout: "5s"
+      healthy_threshold: 1
+      unhealthy_threshold: 2
+
+# Production middleware configuration
+middleware:
+  pipeline:
+    enabled: true
+    middleware:
+      # Tracing (highest priority for request correlation)
+      - name: "tracing"
+        middleware_type: "tracing"
+        priority: 1
+        enabled: true
+        conditions: []
+        config:
+          service_name: "api-gateway-prod"
+          trace_bodies: false  # Disabled for performance
+          trace_headers: true
+          excluded_headers: ["authorization", "cookie", "x-api-key", "x-forwarded-for"]
+          custom_tags:
+            environment: "production"
+            version: "1.0.0"
+
+      # Authentication (early in pipeline)
+      - name: "auth"
+        middleware_type: "authentication"
+        priority: 10
+        enabled: true
+        conditions:
+          - path_prefix: "/api/"
+        config:
+          jwt_validation: true
+          api_key_validation: true
+          oauth2_validation: true
+          cache_tokens: true
+          cache_ttl: "300s"
+
+      # Rate limiting (after auth)
+      - name: "rate_limiting"
+        middleware_type: "rate_limiting"
+        priority: 20
+        enabled: true
+        conditions:
+          - path_prefix: "/api/"
+        config:
+          default_limit: 1000
+          burst_limit: 1500
+          window: "60s"
+          storage: "Redis"
+
+      # Admin-specific rate limiting
+      - name: "admin_rate_limiting"
+        middleware_type: "rate_limiting"
+        priority: 21
+        enabled: true
+        conditions:
+          - path_prefix: "/api/v1/admin/"
+        config:
+          default_limit: 100
+          burst_limit: 150
+          window: "60s"
+          storage: "Redis"
+
+      # Metrics collection
+      - name: "metrics"
+        middleware_type: "metrics"
+        priority: 30
+        enabled: true
+        conditions: []
+        config:
+          detailed_metrics: true
+          per_route_metrics: true
+          per_upstream_metrics: true
+          histogram_buckets: [0.001, 0.01, 0.1, 0.5, 1.0, 2.5, 5.0, 10.0]
+          custom_labels:
+            environment: "production"
+
+      # Request logging
+      - name: "request_logging"
+        middleware_type: "request_logging"
+        priority: 40
+        enabled: true
+        conditions: []
+        config:
+          log_headers: false  # Reduced for performance
+          log_body: false
+          log_response_headers: false
+          log_response_body: false
+          max_body_size: 0  # Disabled
+          excluded_headers: ["authorization", "cookie", "x-api-key"]
+          log_level: "info"
+          sample_rate: 0.1  # Sample 10% of requests
+
+      # Audit logging for admin operations
+      - name: "audit_logging"
+        middleware_type: "audit_logging"
+        priority: 41
+        enabled: true
+        conditions:
+          - path_prefix: "/api/v1/admin/"
+        config:
+          log_all_requests: true
+          log_request_body: true
+          log_response_body: false
+          retention_days: 90
+
+      # Security headers (late in pipeline)
+      - name: "security_headers"
+        middleware_type: "security_headers"
+        priority: 90
+        enabled: true
+        conditions: []
+        config:
+          x_frame_options: "DENY"
+          x_content_type_options: true
+          x_xss_protection: "1; mode=block"
+          strict_transport_security: "max-age=31536000; includeSubDomains; preload"
+          content_security_policy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+          referrer_policy: "strict-origin-when-cross-origin"
+          permissions_policy: "geolocation=(), microphone=(), camera=()"
+          custom_headers:
+            X-Gateway-Version: "1.0.0"
+            X-Environment: "production"
+
+    settings:
+      max_execution_time: "30s"
+      continue_on_error: false
+      collect_metrics: true
+      log_execution: false  # Disabled for performance
+
+  # Production rate limiting with Redis
+  rate_limiting:
+    default_limit: 1000
+    route_limits:
+      "/api/v1/users": 500
+      "/api/v1/admin/*": 100
+    storage:
+      type: "Redis"
+      redis_url: "redis://redis-cluster:6379"
+      key_prefix: "gateway:ratelimit:"
+      pool_size: 20
+
+  # CORS configuration for production
+  cors:
+    allowed_origins: 
+      - "https://app.example.com"
+      - "https://admin.example.com"
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowed_headers: ["Content-Type", "Authorization", "X-API-Key"]
+    exposed_headers: ["X-Request-ID", "X-RateLimit-Remaining"]
+    max_age: 86400  # 24 hours
+    allow_credentials: true
+
+# Production authentication configuration
+auth:
+  jwt:
+    # Use environment variable for secret in production
+    secret: "${JWT_SECRET}"
+    algorithm: "RS256"  # Use RSA for production
+    public_key_url: "https://auth.example.com/.well-known/jwks.json"
+    expiration: "1h"
+    refresh_threshold: "15m"
+    issuer: "https://auth.example.com"
+    audience: "api-gateway"
+
+  oauth2:
+    provider_url: "https://auth.example.com"
+    client_id: "${OAUTH2_CLIENT_ID}"
+    client_secret: "${OAUTH2_CLIENT_SECRET}"
+    scopes: ["read", "write"]
+    token_endpoint: "https://auth.example.com/oauth/token"
+    userinfo_endpoint: "https://auth.example.com/oauth/userinfo"
+
+  api_key:
+    header_name: "X-API-Key"
+    storage:
+      type: "Redis"
+      redis_url: "redis://redis-cluster:6379"
+      key_prefix: "gateway:apikeys:"
+
+# Production observability configuration
+observability:
+  metrics:
+    prometheus_enabled: true
+    endpoint_path: "/metrics"
+    push_gateway_url: "http://prometheus-pushgateway:9091"
+    push_interval: "30s"
+    custom_metrics:
+      - name: "gateway_business_transactions_total"
+        type: "counter"
+        help: "Total business transactions processed"
+        labels: ["service", "operation", "status"]
+
+  logging:
+    level: "info"
+    format: "json"
+    output:
+      type: "File"
+      path: "/var/log/gateway/gateway.log"
+      max_size: "100MB"
+      max_files: 10
+      compress: true
+    structured_logging: true
+    correlation_id_header: "X-Correlation-ID"
+
+  tracing:
+    enabled: true
+    backend:
+      type: "OTLP"
+      endpoint: "http://jaeger-collector:14268/api/traces"
+      headers:
+        Authorization: "Bearer ${TRACING_TOKEN}"
+    sampling_rate: 0.01  # 1% sampling for production
+    service_name: "api-gateway-prod"
+    service_version: "1.0.0"
+    environment: "production"
+
+# Production service discovery
+service_discovery:
+  kubernetes:
+    default_namespace: "production"
+    watch_all_namespaces: false
+    kubeconfig_path: "/var/run/secrets/kubernetes.io/serviceaccount"
+    resync_interval: "30s"
+    label_selector: "app.kubernetes.io/component=backend"
+
+# Production caching with Redis cluster
+cache:
+  enabled: true
+  in_memory:
+    enabled: true
+    max_entries: 50000
+    max_memory_mb: 500
+    cleanup_interval: "300s"
+  redis:
+    enabled: true
+    cluster_mode: true
+    urls: 
+      - "redis://redis-cluster-0:6379"
+      - "redis://redis-cluster-1:6379"
+      - "redis://redis-cluster-2:6379"
+    pool_size: 50
+    connection_timeout: "5s"
+    key_prefix: "gateway:cache:"
+    compression: true
+  default_ttl: "300s"  # 5 minutes
+  global_policy:
+    enabled: true
+    ttl: "300s"
+    cacheable_methods: ["GET", "HEAD"]
+    cacheable_status_codes: [200, 203, 204, 206, 300, 301, 404, 405, 410, 414, 501]
+    vary_headers: ["Accept", "Accept-Encoding", "Authorization"]
+    cache_authenticated: false  # Disabled for security
+    max_response_size: 1048576  # 1MB
+    key_strategy:
+      type: "WithQuery"
+    enable_deduplication: true
+    enable_idempotency: true
+
+# TLS/SSL Configuration for production
+tls:
+  enabled: true
+  cert_file: "/etc/ssl/certs/gateway.crt"
+  key_file: "/etc/ssl/private/gateway.key"
+  ca_file: "/etc/ssl/certs/ca.crt"
+  min_version: "1.2"
+  max_version: "1.3"
+  cipher_suites:
+    - "TLS_AES_256_GCM_SHA384"
+    - "TLS_CHACHA20_POLY1305_SHA256"
+    - "TLS_AES_128_GCM_SHA256"
+  client_auth: "request"  # Optional client certificates
+
+# Production-specific settings
+production:
+  # Resource limits
+  max_connections: 10000
+  connection_pool_size: 100
+  worker_threads: 0  # Use all available cores
+  
+  # Timeouts
+  idle_timeout: "60s"
+  read_timeout: "30s"
+  write_timeout: "30s"
+  
+  # Security
+  hide_server_header: true
+  disable_server_tokens: true
+  max_header_size: 8192
+  max_uri_length: 2048
+  
+  # Performance
+  tcp_nodelay: true
+  tcp_keepalive: true
+  so_reuseport: true
+  
+  # Monitoring
+  health_check_interval: "10s"
+  metrics_collection_interval: "15s"
+  log_rotation_size: "100MB"
+  log_retention_days: 30
