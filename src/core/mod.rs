@@ -1,7 +1,12 @@
+pub mod circuit_breaker;
 pub mod config;
+pub mod connection_pool;
 pub mod error;
-pub mod error_tracking;
 pub mod error_pages;
 pub mod error_recovery;
+pub mod error_tracking;
+pub mod memory_optimization;
+pub mod performance_optimizer;
+pub mod profiler;
 pub mod types;
-pub mod circuit_breaker;
+pub mod zero_copy;

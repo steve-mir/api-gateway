@@ -54,6 +54,7 @@ pub mod security;
 pub mod security_scanner;
 pub mod compliance;
 pub mod backup_recovery;
+pub mod performance;
 
 pub use endpoints::{AdminRouter, AdminState};
 pub use audit::{ConfigAudit, ConfigChange, ConfigChangeType, AuditStatistics};
@@ -103,6 +104,13 @@ pub use k8s_management::{
     K8sResourceManager, K8sResourceOperations, K8sAdvancedOperations, K8sResourceInfo, 
     ScalingRequest, HPAConfig, PodMetrics, IngressConfig, IngressRule, IngressPath,
     ClusterInfo, NodeMetrics, NodeCondition, DeploymentRevision
+};
+
+pub use performance::{
+    PerformanceAdminState, PerformanceConfig, PerformanceMonitoringConfig, 
+    AutoTuningConfig, AlertThresholds, HotPathDetectionConfig,
+    PerformanceMetricsCollector, PerformanceSnapshot, HotPathStats,
+    PerformanceAlert, AlertType, AlertSeverity, create_performance_routes
 };
 
 // Re-export cache admin from caching module

@@ -97,6 +97,11 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 rand = "0.8"
 fastrand = "2.0"
 
+# Performance optimization
+bytes = "1.5"
+smallvec = "1.11"
+ahash = "0.8"
+
 # Regular expressions
 regex = "1.10"
 
@@ -122,5 +127,6 @@ tempfile = "3.8"
 axum-test = "14.0"
 futures = "0.3"
 futures-util = "0.3.31"
+http = "1.0"
 
 
