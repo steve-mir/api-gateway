@@ -8,5 +8,6 @@ pub mod error_tracking;
 pub mod memory_optimization;
 pub mod performance_optimizer;
 pub mod profiler;
+pub mod security;
 pub mod types;
 pub mod zero_copy;
