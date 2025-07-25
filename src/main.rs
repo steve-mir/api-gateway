@@ -1,4 +1,4 @@
-//! # API Gateway
+//! # API Gateway - Main Entry Point
 //! 
 //! A high-performance API Gateway built in Rust for containerized deployment in Kubernetes clusters.
 //! This gateway serves as a unified entry point for multiple communication protocols (gRPC, REST, WebSocket)
@@ -22,17 +22,42 @@
 //!
 //! This codebase extensively uses Rust's ownership system and async programming model:
 //!
-//! ### Ownership and Borrowing
-//! - `Arc<T>` (Atomically Reference Counted) is used for shared ownership of immutable data
+//! ### Ownership and Borrowing (Key Rust Concept)
+//! Unlike garbage-collected languages (Java, Python, Go), Rust uses a unique ownership system:
+//! - Each value has exactly one owner at a time
+//! - When the owner goes out of scope, the value is automatically dropped (freed)
+//! - You can "borrow" references to data without taking ownership
+//! - `Arc<T>` (Atomically Reference Counted) allows multiple owners of the same data
 //! - `Mutex<T>` and `RwLock<T>` provide thread-safe mutable access
 //! - References (`&T`) are used for borrowing data without taking ownership
 //! - `Clone` trait is implemented for types that need to be duplicated
 //!
-//! ### Async Programming
+//! ### Memory Safety Without Garbage Collection
+//! Rust prevents common bugs at compile time:
+//! - No null pointer dereferences (use `Option<T>` instead of null)
+//! - No buffer overflows (bounds checking on arrays/vectors)
+//! - No use-after-free (ownership system prevents this)
+//! - No data races (borrow checker ensures thread safety)
+//!
+//! ### Async Programming (Similar to Node.js/Python asyncio)
 //! - All I/O operations use `async/await` for non-blocking execution
-//! - `tokio` runtime manages the async task scheduler
-//! - `Arc` is used to share data between async tasks
+//! - `tokio` runtime manages the async task scheduler (like Node.js event loop)
+//! - `Arc` is used to share data between async tasks (like shared objects in other languages)
 //! - Channels (`mpsc`, `broadcast`) are used for communication between tasks
+//! - Unlike callbacks, async/await provides linear, readable code flow
+//!
+//! ### Error Handling (Different from Exceptions)
+//! Rust doesn't use exceptions. Instead:
+//! - `Result<T, E>` type represents operations that can fail
+//! - `Option<T>` represents values that might not exist (instead of null)
+//! - `?` operator propagates errors up the call stack (like `try/catch` but explicit)
+//! - Errors must be handled explicitly - no silent failures
+//!
+//! ### Pattern Matching (More Powerful than Switch Statements)
+//! - `match` expressions handle all possible cases
+//! - Compiler ensures all cases are covered
+//! - Can destructure complex data types
+//! - Guards and ranges provide additional matching power
 
 use tokio::signal;
 use tracing::{info, error};

@@ -1,16 +1,58 @@
-//! # Error Handling Module
+//! # Error Handling Module - Rust Error Handling Explained
 //!
 //! This module provides comprehensive error handling for the API Gateway using the `thiserror` crate.
 //! It defines all possible error types that can occur during gateway operations and provides
 //! proper HTTP status code mappings for client responses.
 //!
-//! ## Rust Error Handling Concepts
+//! ## Rust Error Handling Concepts (For Developers from Other Languages)
 //!
-//! Rust uses `Result<T, E>` for error handling instead of exceptions:
-//! - `Ok(value)` represents success with a value
-//! - `Err(error)` represents failure with an error
-//! - The `?` operator propagates errors up the call stack
-//! - `thiserror` provides ergonomic error type definitions with automatic `Display` and `Error` trait implementations
+//! ### No Exceptions - Results Instead
+//! Unlike Java, Python, or JavaScript, Rust doesn't use exceptions for error handling.
+//! Instead, it uses the `Result<T, E>` type:
+//! - `Ok(value)` represents success with a value (like returning normally)
+//! - `Err(error)` represents failure with an error (like throwing an exception)
+//! - This makes error handling explicit and prevents silent failures
+//!
+//! ### The `?` Operator - Error Propagation
+//! The `?` operator is Rust's equivalent to `try/catch` but more explicit:
+//! ```rust
+//! fn example() -> Result<String, Error> {
+//!     let file = std::fs::read_to_string("config.yaml")?; // If this fails, return early with error
+//!     let config = serde_yaml::from_str(&file)?;          // If this fails, return early with error
+//!     Ok(process_config(config))                          // If we get here, everything succeeded
+//! }
+//! ```
+//! This is equivalent to:
+//! ```rust
+//! fn example() -> Result<String, Error> {
+//!     let file = match std::fs::read_to_string("config.yaml") {
+//!         Ok(content) => content,
+//!         Err(e) => return Err(e.into()),
+//!     };
+//!     let config = match serde_yaml::from_str(&file) {
+//!         Ok(cfg) => cfg,
+//!         Err(e) => return Err(e.into()),
+//!     };
+//!     Ok(process_config(config))
+//! }
+//! ```
+//!
+//! ### Enum-Based Error Types
+//! Rust uses enums to represent different error cases, unlike exception hierarchies:
+//! - Each variant represents a different error condition
+//! - Pattern matching ensures all error cases are handled
+//! - Compiler prevents forgetting to handle error cases
+//!
+//! ### Trait System for Error Behavior
+//! - `Display` trait: How to format the error for users (like `toString()`)
+//! - `Error` trait: Marks types as errors and provides error chaining
+//! - `From` trait: Automatic conversion between error types
+//! - `thiserror` crate: Automatically implements these traits with macros
+//!
+//! ### Memory Safety in Error Handling
+//! - No null pointer exceptions (use `Option<T>` for nullable values)
+//! - No memory leaks from exception unwinding
+//! - Errors are just data - they can be stored, passed around, and analyzed
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
